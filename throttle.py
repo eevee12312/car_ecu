@@ -1,12 +1,12 @@
 import pygame
 import time
+import threading
 import socket
 import os
-from engine_sound import EngineSoundSimulator, play_turbo
-
+from engine_sound_mine import play_turbo,EngineSoundSimulator
 # === Choose Tune Mode ===
 # Options: "stock", "upgraded"
-TUNE_MODE = "track"
+TUNE_MODE = "upgraded"
 
 # === Engine Tune Profiles ===
 TUNES = {
@@ -52,26 +52,26 @@ TUNES = {
         "max_boost": 32.0,  
         "max_torque": 550, 
     },
-    "track": { #top speed 380
-        "MAX_RPM":11000,
-        "IDLE_RPM":1000,
-        "final_drive":4.111,
-        "tire_diameter_m":0.64,
-        "driveline_efficiency":0.85,
-        "engine_inertia":0.2,
-        "car_mass":1700,
+    "qm": { # 0-60 & 1/4mi optimized
+        "MAX_RPM": 9500,               # Still sporty, but not excessive to reduce unnecessary rev time
+        "IDLE_RPM": 1100,              # Higher idle helps quicker launches
+        "final_drive": 4.55,           # Shorter for more wheel torque
+        "tire_diameter_m": 0.60,       # Slightly smaller tire increases effective torque
+        "driveline_efficiency": 0.88, # Better tuned power delivery
+        "engine_inertia": 0.18,        # Faster RPM climb
+        "car_mass": 1450,              # Lightweight build
         "GEARS": {
             0: 0,
-            1: 4.06,
-            2: 2.30,
-            3: 1.59,
-            4: 1.25,
+            1: 4.35,                   # Shorter 1st gear for strong launch
+            2: 2.60,                   # Closer ratios
+            3: 1.85,
+            4: 1.35,
             5: 1.0,
-            6: 0.85     
+            6: 0.80     
         },
-        "peak_rpm":7000,
-        "max_boost":33.0,
-        "max_torque":652,
+        "peak_rpm": 7500,              # Torque stays high near redline
+        "max_boost": 35.0,             # Maxed turbo pressure
+        "max_torque": 720,             # High output engine tune
     }
 }
 
@@ -90,14 +90,15 @@ GEARS = tune["GEARS"]
 peak_rpm = tune["peak_rpm"]
 max_boost = tune["max_boost"]
 max_torque = tune["max_torque"]
+LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
+LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 
 global peak_hp, peak_rpm_recorded, top_speed
 peak_rpm_recorded = 0
 top_speed = 0
 peak_hp = 0
+sim = EngineSoundSimulator("sounds/engine_idle.wav")
 
-# === Engine Sound ===
-sim = EngineSoundSimulator("sounds/exhaust_grain.wav")
 
 # === Engine State ===
 rpm = IDLE_RPM
@@ -106,7 +107,7 @@ engine_on = False
 
 # === Log ===
 def log():
-    msg = f"========\nTune:{TUNE_MODE}\nPeak RPM: {peak_rpm_recorded}\nTop Speed:{top_speed}\nPeak HorsePower: {peak_hp}\n========\n"
+    msg = f"========\nTune:{TUNE_MODE}\nPeak RPM: {peak_rpm_recorded}\nTop Speed:{top_speed}\nPeak HorsePower: {peak_hp}\n0-60 mph: {time_0_60:.2f} s\n1/4 Mile: {time_qm:.2f} s, Speed: {speed_kph_at_qm:.1f}\n========\n"
     with open("log.txt", 'a') as file:
         file.write(msg)
 
@@ -210,6 +211,7 @@ def send_data_to_server(rpm: int, speed: float, temp: float, gear: int, boost: f
 
 # === Main Loop ===
 def get_throttle_and_buttons():
+    turbo_release_cooldown=time.time()-1
     engine_temp = 70.0
     global gear, rpm, engine_on, peak_hp, peak_rpm_recorded, top_speed
 
@@ -222,6 +224,11 @@ def get_throttle_and_buttons():
     speed = 0
     last_time = time.time()
     prev_thr = 0
+    start_timer = None
+    distance = 0
+    recorded_0_60 = False
+    recorded_qm = False
+    result_logged = False
 
     try:
         while True:
@@ -242,7 +249,6 @@ def get_throttle_and_buttons():
                 os.system("cls")
                 print("ENGINE OFF\nThrottle: 0%\nGear: N\nRPM: 0\nSpeed: 0.00 km/h")
                 time.sleep(0.1)
-                sim.stop()
                 continue
 
             # === Throttle ===
@@ -253,14 +259,45 @@ def get_throttle_and_buttons():
             shifted = False
             prev_gear = gear
 
-            if joystick.get_button(8) and clutch > 0.9:
+            # === Launch Control ===
+            launch_mode_active = False
+            if gear == 0 and clutch > 0.95 and joystick.get_button(LAUNCH_BUTTON_INDEX):
+                launch_mode_active = True
+                rpm = LAUNCH_CONTROL_RPM
+                throttle=0.7
+
+            turbo_release_pressed = joystick.get_button(3)
+            turbo_now=time.time()
+            if turbo_release_pressed and turbo_now > turbo_release_cooldown:
+                turbo_release_active = True
+                boost = 0
+                play_turbo_async("sounds/turbo_flutter.wav")
+                turbo_release_cooldown = turbo_now + 1.0  # 1 sec cooldown
+            else:
+                turbo_release_active = False
+                # calculate boost normally
+                _, _, boost = calculate_engine_torque_hp(rpm, throttle)
+
+            # If turbo release active, force boost=0
+            if turbo_release_active:
+                boost = 0
+
+            torque, hp, _ = calculate_engine_torque_hp(rpm, throttle)
+            # If turbo release active, torque is based on 0 boost
+            if turbo_release_active:
+                torque = throttle * max_torque * (rpm / peak_rpm) if rpm < peak_rpm else 0
+
+
+
+
+            if joystick.get_button(8) and clutch > 0.7:
                 if gear < 6:
                     gear += 1
                     rpm = shift_gear(gear, rpm, prev_gear)
                     shifted = True
                     time.sleep(0.2)
 
-            if joystick.get_button(9) and clutch > 0.9:
+            if joystick.get_button(9) and clutch > 0.7:
                 if gear > 0:
                     gear -= 1
                     rpm = shift_gear(gear, rpm, prev_gear)
@@ -271,7 +308,9 @@ def get_throttle_and_buttons():
             torque, hp, boost = calculate_engine_torque_hp(rpm, throttle)
             acceleration = calculate_acceleration(torque, gear)
 
-            if throttle < 0.8 and not shifted:
+            if launch_mode_active:
+                rpm = LAUNCH_CONTROL_RPM  # Maintain set RPM for launch
+            elif throttle < 0.8 and not shifted:
                 rpm -= (rpm - IDLE_RPM) * ((1 - throttle) * 0.2)
             else:
                 rpm += torque * engine_inertia
@@ -289,21 +328,45 @@ def get_throttle_and_buttons():
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
             speed = update_speed(speed, acceleration, dt)
             speed_kph = calculate_speed_kph(rpm, gear)
+            distance+=(speed/3.6)*dt
             engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
-
             sim.update_rpm(rpm)
             send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
 
-            if boost > 15 and throttle < 0.6:
-                play_turbo("sounds/bov.wav")
 
-            if rpm < 1000 and clutch > 0.9 and gear == 0:
-                print("stall")
 
-            if gear == 0 and clutch > 0.8:
-                rpm = max(rpm - 50, IDLE_RPM)
+            global speed_kph_at_qm,time_0_60
+            if speed_kph > 3 and start_timer is None:
+                start_timer = time.time()
+                recorded_0_60 = False
+                recorded_qm = False
+                result_logged = False
+                distance = 0
+
+            if start_timer and not recorded_0_60 and speed_kph >= 96.5:
+                time_0_60 = time.time() - start_timer
+                recorded_0_60 = True
+
+            if start_timer and not recorded_qm and distance >= 402.0:
+                global time_qm
+                time_qm = time.time() - start_timer
+                recorded_qm = True
+                speed_kph_at_qm=speed_kph
+
+            if recorded_0_60 and recorded_qm and not result_logged:
+                result_logged = True
+
+            # Reset when stopped
+            if speed_kph < 2 and start_timer:
+                start_timer = None
+                recorded_0_60 = False
+                recorded_qm = False
+                result_logged = False
+                distance = 0
+
 
             os.system("cls")
+            print(f"Engine On: {engine_on}")
             print(f"TUNE MODE: {TUNE_MODE.upper()}")
             print(f"Throttle: {int(throttle * 100)}%")
             print(f"RPM: {int(rpm)}")
@@ -313,6 +376,8 @@ def get_throttle_and_buttons():
             print(f"Torque: {torque:.2f} Nm")
             print(f"Boost: {boost:.1f} PSI")
             print(f"Engine Temp: {engine_temp:.1f}°C")
+            print(f"Distance: {distance}")
+            
 
             if rpm > peak_rpm_recorded:
                 peak_rpm_recorded = rpm
@@ -326,9 +391,14 @@ def get_throttle_and_buttons():
 
     except KeyboardInterrupt:
         pygame.quit()
+    finally:
+        pygame.quit()
         sim.stop()
+        log()
 
 # === Entry Point ===
 if __name__ == "__main__":
     engine_on = True
     get_throttle_and_buttons()
+def play_turbo_async(sound_file):
+    threading.Thread(target=play_turbo, args=(sound_file,), daemon=True).start()

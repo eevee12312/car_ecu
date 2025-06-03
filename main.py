@@ -6,22 +6,23 @@ import pygame
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QLabel, QDial, QPushButton, QFrame, QSpacerItem, QSizePolicy
+    QHBoxLayout, QLabel, QDial, QPushButton, QGridLayout, QFrame, QSpacerItem, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
-from PyQt6.QtGui import QFont, QPalette
+from PyQt6.QtGui import QFont, QPalette, QLinearGradient, QBrush, QColor
+
 
 import throttle
+from engine_sound_mine import EngineSoundSimulator, play_turbo
 from throttle import MAX_RPM, max_boost,estp
 from tachometer import CircularGauge, SpeedGauge, RevLight, TurboGauge, GearDisplay, TempGauge
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QGridLayout, QFrame
-from PyQt6.QtGui import QFont, QPalette, QLinearGradient, QBrush, QColor
-from PyQt6.QtCore import Qt, QTimer
+
 
 class DataSignal(QObject):
     data_received = pyqtSignal(int, float, float, int, float, float, float)  
     # rpm, speed, temp, gear, boost, hp, torque
-
+def play_turbo_async(sound_file):
+    threading.Thread(target=play_turbo, args=(sound_file,), daemon=True).start()
 
 class ECUGUI(QMainWindow):
     secret_combo_signal = pyqtSignal()
@@ -139,7 +140,9 @@ class ECUGUI(QMainWindow):
             self.update_display(0, 0.0, 0.0, 0, 0.0, 0.0, 0.0)
             throttle.log()
         else:
+            #play_turbo("sounds/engine_startup.wav")
             throttle.engine_on = True
+            play_turbo_async("sounds/engine_startup.wav")
             threading.Thread(target=throttle.get_throttle_and_buttons, daemon=True).start()
             print("Engine started!")
 
@@ -152,7 +155,6 @@ class ECUGUI(QMainWindow):
         self.turbo_gauge.set_psi(boost)
         self.gear_display.set_gear(gear)
         self.temp_gauge.set_temp(temp)
-        self.rpm_gauge.set_speed(speed)
 
         if self.secret_window and self.secret_window.isVisible():
             self.secret_window.update_values(torque, hp, rpm, speed, boost,gear)

@@ -1,9 +1,9 @@
 import sys
 import math
-from throttle import MAX_RPM,max_boost, estp
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QHBoxLayout
+from throttle import MAX_RPM,max_boost,estp
+from PyQt6.QtWidgets import QApplication, QWidget , QHBoxLayout
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 
 
 class CircularGauge(QWidget):
@@ -12,26 +12,21 @@ class CircularGauge(QWidget):
         self.min_value = min_value
         self.max_value = max_value
         self.value = min_value
-        self.speed = 0  # in km/h
 
-        self.start_angle = 225 #245
-        self.sweep_angle = 270
-        self.setFixedSize(400, 400)
+        self.start_angle=225
+        self.sweep_angle=270
 
     def set_value(self, value):
         self.value = max(self.min_value, min(self.max_value, value))
         self.update()
 
-    def set_speed(self, speed):
-        self.speed = speed
-        self.update()
-
     def paintEvent(self, event):
+        
         width = self.width()
         height = self.height()
         radius = min(width, height) // 2 - 30
-        center = width // 2, height // 2
 
+        center = width // 2, height // 2
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -39,27 +34,12 @@ class CircularGauge(QWidget):
         painter.setPen(QPen(Qt.GlobalColor.black, 4))
         painter.drawEllipse(center[0] - radius, center[1] - radius, 2 * radius, 2 * radius)
 
-        inner_radius = radius - 90
-        outer_radius = radius - 40  # 20 px thick ring
-        ring_radius = (inner_radius + outer_radius) / 2
-        ring_thickness = outer_radius - inner_radius
-
-        painter.setPen(QPen(QColor(255, 0, 0), ring_thickness))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(
-            int(center[0] - ring_radius),
-            int(center[1] - ring_radius),
-            int(2 * ring_radius),
-            int(2 * ring_radius)
-        )
-
-
         # Ticks and labels
-        num_ticks = int(MAX_RPM / 1000)
+        num_ticks = int(MAX_RPM/1000)
         font = QFont("Arial", 10)
         painter.setFont(font)
-
         painter.setPen(QPen(Qt.GlobalColor.white, 4))
+
         for i in range(num_ticks + 1):
             tick_val = self.min_value + i * (self.max_value - self.min_value) // num_ticks
             angle_deg = self.start_angle - (i * self.sweep_angle / num_ticks)
@@ -76,33 +56,12 @@ class CircularGauge(QWidget):
             label_radius = radius - 25
             lx = center[0] + label_radius * math.cos(angle_rad)
             ly = center[1] - label_radius * math.sin(angle_rad)
-            label_text = str(int(tick_val / 1000))
+            label_text = str(int(tick_val/1000))
             text_width = painter.fontMetrics().horizontalAdvance(label_text)
             text_height = painter.fontMetrics().height()
             painter.drawText(int(lx - text_width / 2), int(ly + text_height / 4), label_text)
 
-
-        
-
-        # Redline arc
-        redline_start = int(MAX_RPM) - 2000
-        redline_end = int(MAX_RPM)
-        start_angle_deg = self.start_angle - ((redline_start - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
-        end_angle_deg = self.start_angle - ((redline_end - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
-
-        rect_size = radius * 2
-        arc_rect = center[0] - radius, center[1] - radius, rect_size, rect_size
-
-        painter.setPen(QPen(QColor("red"), 5))
-        painter.drawArc(*arc_rect,
-                        int(end_angle_deg * 16),
-                        int((start_angle_deg - end_angle_deg) * 16))
-
-        # Center cap
-        painter.setBrush(QColor("black"))
-        painter.drawEllipse(center[0] - 5, center[1] - 5, 10, 10)
-
-        #needle
+        # Needle
         angle = self.start_angle - ((self.value - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
         angle_rad = math.radians(angle)
         needle_length = radius - 30
@@ -111,57 +70,25 @@ class CircularGauge(QWidget):
         painter.setPen(QPen(QColor("red"), 4))
         painter.drawLine(center[0], center[1], int(x), int(y))
 
-        # Blue arc (speedometer window)
-        inner_radius = radius - 90
-        outer_radius = radius - 10
-        start_deg = 230
-        end_deg = 310
-
-        path = QPainterPath()
-
-        # Outer arc (clockwise)
-        for angle in range(start_deg, end_deg + 1):
-            angle_rad = math.radians(angle)
-            x = center[0] + outer_radius * math.cos(angle_rad)
-            y = center[1] - outer_radius * math.sin(angle_rad)
-            if angle == start_deg:
-                path.moveTo(x, y)
-            else:
-                path.lineTo(x, y)
-
-        # Inner arc (counter-clockwise)
-        for angle in range(end_deg, start_deg - 1, -1):
-            angle_rad = math.radians(angle)
-            x = center[0] + inner_radius * math.cos(angle_rad)
-            y = center[1] - inner_radius * math.sin(angle_rad)
-            path.lineTo(x, y)
-
-        path.closeSubpath()
-
-        painter.setBrush(QColor(0, 50, 255))  # GT-R blue
-        painter.setPen(QPen(Qt.GlobalColor.white, 2))
-        painter.drawPath(path)
-
-        # Speed text inside the arc
-        speed_text = f"{int(self.speed)}"
-
-        speed_font = QFont("Arial", 36, QFont.Weight.Bold)
-
-        painter.setPen(Qt.GlobalColor.white)
-
-        # Bottom center angle in radians
-
-        bottom_angle_rad = math.radians(270)
-        speed_text_radius = (inner_radius + outer_radius) / 2 - 10
-        speed_x = center[0] + speed_text_radius * math.cos(bottom_angle_rad)
-        speed_y = center[1] - speed_text_radius * math.sin(bottom_angle_rad)
-
-        painter.setFont(speed_font)
-        speed_text_width = painter.fontMetrics().horizontalAdvance(speed_text)
-        speed_text_height = painter.fontMetrics().height()
-        painter.drawText(int(speed_x - speed_text_width / 2), int(speed_y + speed_text_height / 2), speed_text)
+        # RedLine
+        redline_start = 7000
+        redline_end = int(MAX_RPM)
+        start_angle_deg = self.start_angle - ((redline_start - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
+        end_angle_deg = self.start_angle - ((redline_end - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
 
 
+        rect_size = radius * 2
+        arc_rect = center[0] - radius, center[1] - radius, rect_size, rect_size
+
+        painter.setPen(QPen(QColor("red"), 5))
+        painter.drawArc(*arc_rect,
+                int(end_angle_deg * 16),
+                int((start_angle_deg - end_angle_deg) * 16))
+
+
+        # Center cap
+        painter.setBrush(QColor("black"))
+        painter.drawEllipse(center[0] - 5, center[1] - 5, 10, 10)
 
 
 class SpeedGauge(QWidget):
@@ -380,9 +307,9 @@ class TurboGauge(QWidget):
             y2 = center[1] - radius * math.sin(angle_rad)
             if int(tick_val)%3==0:
                 painter.setPen(QPen(Qt.GlobalColor.white, 4))
-                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
             else:
                 painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
 
             # Labels
@@ -471,7 +398,7 @@ class GearDisplay(QWidget):
         # Draw gear number centered in white with LCD font
         painter.setPen(QColor("#C7C6C6"))
         font_size = inner_radius  # font size relative to inner radius
-        font = QFont("Arial", font_size, QFont.Weight.Bold)
+        font = QFont("DS-Digital", font_size, QFont.Weight.Bold)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         painter.setFont(font)
 
@@ -569,7 +496,7 @@ class TempGauge(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    display = GearDisplay()
-    display.set_gear(1)  # Set initial gear
+    display = CircularGauge()
+    display.set_value(7200)  # Set initial gear
     display.show()
     sys.exit(app.exec())
