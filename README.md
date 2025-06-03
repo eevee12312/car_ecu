@@ -14,7 +14,7 @@ A Python-based real-time simulator of the legendary **VR38DETT** engine from the
   - Real-time RPM-based engine audio
   - Turbo flutter effects (optional)
   
-- 🕹️ **Gamepad/Joystick Control**
+- 🕹️ **Joystick Control**
   - Throttle, clutch, and manual gear shifting support
   - Smooth acceleration and deceleration
 
