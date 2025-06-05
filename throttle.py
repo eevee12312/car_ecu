@@ -500,14 +500,14 @@ def get_throttle_and_buttons():
                 distance = 0
 
 
-            '''os.system("cls")
+            os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
             print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {speed:.2f}")
             print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Top Speed: {top_speed:>6.2f} km/h")
             print(f"Peak RPM: {peak_rpm_recorded} | Peak HP: {peak_hp:.1f} | Distance: {distance:.2f} m")
             print(f"Peak Speed: {top_speed:.1f} km/h | Peak Torque: {max_torque:.1f} Nm")
-            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {boost:.1f} PSI")'''
+            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {boost:.1f} PSI")
 
             if result_logged:
                 print(f"0-60 mph: {time_0_60:.2f} s | 1/4 mi: {time_qm:.2f} s @ {speed_kph_at_qm:.1f} km/h")
