@@ -126,9 +126,10 @@ class ECUGUI(QMainWindow):
                 while joystick.get_button(1):
                     pygame.event.pump()
                     time.sleep(0.1)
-            if joystick.get_button(4) and joystick.get_button(5):
+            if joystick.get_hat(0) == (0,1) and joystick.get_button(0):
+                throttle.open_ve_map()
                 self.secret_combo_signal.emit()
-                while joystick.get_button(4) and joystick.get_button(5):
+                while joystick.get_hat(0) == (0,1) and joystick.get_button(0):
                     pygame.event.pump()
                     time.sleep(0.1)
             time.sleep(0.1)
@@ -138,7 +139,9 @@ class ECUGUI(QMainWindow):
             throttle.engine_on = False
             print("Engine shutdown initiated.")
             self.update_display(0, 0.0, 0.0, 0, 0.0, 0.0, 0.0)
-            throttle.log()
+            if not throttle.logged:
+                throttle.log()
+                throttle.logged=True
         else:
             #play_turbo("sounds/engine_startup.wav")
             throttle.engine_on = True

@@ -1,6 +1,6 @@
 import sys
 import math
-from throttle import MAX_RPM,max_boost,estp
+from throttle import MAX_RPM,max_boost,estp,red_line
 from PyQt6.QtWidgets import QApplication, QWidget , QHBoxLayout
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
@@ -71,7 +71,7 @@ class CircularGauge(QWidget):
         painter.drawLine(center[0], center[1], int(x), int(y))
 
         # RedLine
-        redline_start = 7000
+        redline_start = int(red_line)
         redline_end = int(MAX_RPM)
         start_angle_deg = self.start_angle - ((redline_start - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
         end_angle_deg = self.start_angle - ((redline_end - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
@@ -253,7 +253,7 @@ class RevLight(QWidget):
                 self.blinking = False
                 self.blink_timer.stop()
                 # Reset last two lights color after blinking stops
-                for i in range(6,8):
+                for i in range(self.num_lights-2,self.num_lights):
                     color = "red" if rpm >= (i + 1) * self.step else "gray"
                     self.rev_labels[i].setStyleSheet(f"""
                         border-radius: 20px;

@@ -3,79 +3,160 @@ import time
 import threading
 import socket
 import os
-from engine_sound_mine import play_turbo,EngineSoundSimulator
-# === Choose Tune Mode ===
+from datetime import datetime
+from engine_sound_mine import play_turbo, EngineSoundSimulator
+import json
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+import subprocess
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def psi_to_kpa(psi):
+    return psi * 6.89476
+
+# === VE Map class for advanced engine performance modeling ===
+class VEMap2D:
+    def __init__(self, rpm_points, map_psi_points):
+        self.rpm_points = rpm_points
+        self.map_psi_points = map_psi_points
+        self.ve_grid = np.ones((len(map_psi_points), len(rpm_points))) * 0.7
+        for i, psi in enumerate(map_psi_points):
+            for j, rpm in enumerate(rpm_points):
+                base_ve = 0.5 + 0.5 * np.exp(-((rpm - 4500)/2000)**2)
+                boost_factor = 1 - 0.015 * (psi - 5)
+                self.ve_grid[i, j] = np.clip(base_ve * boost_factor, 0.4, 1.0)
+
+    def get_ve(self, rpm, map_kpa):
+        map_psi = map_kpa / 6.89476
+        rpm = np.clip(rpm, self.rpm_points[0], self.rpm_points[-1])
+        map_psi = np.clip(map_psi, self.map_psi_points[0], self.map_psi_points[-1])
+        rpm_idx = np.searchsorted(self.rpm_points, rpm) - 1
+        rpm_idx = np.clip(rpm_idx, 0, len(self.rpm_points) - 2)
+        rpm_frac = (rpm - self.rpm_points[rpm_idx]) / (self.rpm_points[rpm_idx+1] - self.rpm_points[rpm_idx])
+        map_idx = np.searchsorted(self.map_psi_points, map_psi) - 1
+        map_idx = np.clip(map_idx, 0, len(self.map_psi_points) - 2)
+        map_frac = (map_psi - self.map_psi_points[map_idx]) / (self.map_psi_points[map_idx+1] - self.map_psi_points[map_idx])
+
+        ve00 = self.ve_grid[map_idx, rpm_idx]
+        ve01 = self.ve_grid[map_idx, rpm_idx+1]
+        ve10 = self.ve_grid[map_idx+1, rpm_idx]
+        ve11 = self.ve_grid[map_idx+1, rpm_idx+1]
+
+        ve_r0 = ve00 + rpm_frac * (ve01 - ve00)
+        ve_r1 = ve10 + rpm_frac * (ve11 - ve10)
+        return ve_r0 + map_frac * (ve_r1 - ve_r0)
+
+    def to_json(self):
+        return json.dumps({
+            'rpm_points': self.rpm_points.tolist(),
+            'map_psi_points': self.map_psi_points.tolist(),
+            've_grid': self.ve_grid.tolist()
+        }, indent=2)
+
+    def from_json(self, json_str):
+        data = json.loads(json_str)
+        self.rpm_points = np.array(data['rpm_points'])
+        self.map_psi_points = np.array(data['map_psi_points'])
+        self.ve_grid = np.array(data['ve_grid'])
+
+# === Example: Load VE map from file or use default ===
+
+
+
 # Options: "stock", "upgraded"
-TUNE_MODE = "upgraded"
+TUNE_MODE = "race"
 
 # === Engine Tune Profiles ===
 TUNES = {
-    "stock": { #top speed 270
-        "MAX_RPM": 8000,               # Stock rev limit for R35 VR38DETT engine
-        "IDLE_RPM": 800,               # Typical stock idle RPM
-        "final_drive": 4.111,           # Stock final drive ratio (close to actual ~3.91)
-        "tire_diameter_m": 0.62,       # Approximate stock tire diameter in meters (~25 inches)
-        "driveline_efficiency": 0.75,  # Driveline loss ~25%
-        "engine_inertia": 0.3,         # Estimated engine inertia
-        "car_mass": 1740,              # Approximate curb weight (kg)
+    "stock": {  # Top speed ~276 km/h
+        "MAX_RPM": 7000,
+        "IDLE_RPM": 800,
+        "final_drive": 3.7,
+        "tire_diameter_m": 0.62,  # ~245/40R20
+        "driveline_efficiency": 0.78,
+        "engine_inertia": 0.35,
+        "car_mass": 1740,
         "GEARS": {
             0: 0,
             1: 4.06,
             2: 2.30,
             3: 1.59,
             4: 1.25,
-            5: 1.0,
-            6: 0.85     
+            5: 1.00,
+            6: 0.80
         },
-        "peak_rpm": 4800,              # Peak power RPM
-        "max_boost": 22.0,             # Stock max boost (around 21-23 PSI)
-        "max_torque": 430,             # Stock torque (Nm) - ~430Nm (~317 lb-ft)
+        "peak_rpm": 4800,
+        "red_line": 5800,
+        "max_boost": 17.0,  # psi
+        "max_torque": 652,  # Nm (Stock VR38DETT in Nismo trim)
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json"
+        
     },
-    "upgraded": { #top speed 301
-        "MAX_RPM": 9000,      
-        "IDLE_RPM": 900,        
-        "final_drive": 4.11,     
-        "tire_diameter_m": 0.62,    
-        "driveline_efficiency": 0.82,
-        "engine_inertia": 0.25, 
-        "car_mass": 1500,            
+
+    "stage2": {  # ECU + turbo back exhaust tune
+        "MAX_RPM": 8000,
+        "IDLE_RPM": 850,
+        "final_drive": 3.7,
+        "tire_diameter_m": 0.62,
+        "driveline_efficiency": 0.8,
+        "engine_inertia": 0.32,
+        "car_mass": 1720,
         "GEARS": {
             0: 0,
             1: 4.06,
             2: 2.30,
             3: 1.59,
             4: 1.25,
-            5: 1.0,
-            6: 0.85     
+            5: 1.00,
+            6: 0.80
         },
-        "peak_rpm": 8500,
-        "max_boost": 32.0,  
-        "max_torque": 550, 
+        "peak_rpm": 5200,
+        "red_line": 6200,
+        "max_boost": 22.0,
+        "max_torque": 720,
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
     },
-    "qm": { # 0-60 & 1/4mi optimized
-        "MAX_RPM": 9500,               # Still sporty, but not excessive to reduce unnecessary rev time
-        "IDLE_RPM": 1100,              # Higher idle helps quicker launches
-        "final_drive": 4.55,           # Shorter for more wheel torque
-        "tire_diameter_m": 0.60,       # Slightly smaller tire increases effective torque
-        "driveline_efficiency": 0.88, # Better tuned power delivery
-        "engine_inertia": 0.18,        # Faster RPM climb
-        "car_mass": 1450,              # Lightweight build
+
+    "race": {  #top speed 352
+        "MAX_RPM": 9200,
+        "IDLE_RPM": 1100,
+        "final_drive": 3.9,
+        "tire_diameter_m": 0.60,  # semi-slicks or drag radials
+        "driveline_efficiency": 0.85,
+        "engine_inertia": 0.28,
+        "car_mass": 1680,
         "GEARS": {
             0: 0,
-            1: 4.35,                   # Shorter 1st gear for strong launch
-            2: 2.60,                   # Closer ratios
-            3: 1.85,
-            4: 1.35,
-            5: 1.0,
-            6: 0.80     
+            1: 3.90,
+            2: 2.20,
+            3: 1.55,
+            4: 1.20,
+            5: 0.95,
+            6: 0.70
         },
-        "peak_rpm": 7500,              # Torque stays high near redline
-        "max_boost": 35.0,             # Maxed turbo pressure
-        "max_torque": 720,             # High output engine tune
+        "peak_rpm": 5800,
+        "red_line": 6800,
+        "max_boost": 30.0,
+        "max_torque": 850,
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
     }
 }
-
-
 # === Load selected tune ===
 tune = TUNES[TUNE_MODE]
 
@@ -90,30 +171,71 @@ GEARS = tune["GEARS"]
 peak_rpm = tune["peak_rpm"]
 max_boost = tune["max_boost"]
 max_torque = tune["max_torque"]
+red_line = tune["red_line"]
+tune_path=tune['tune']
 LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
 LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
+logged = False
 
 global peak_hp, peak_rpm_recorded, top_speed
 peak_rpm_recorded = 0
 top_speed = 0
 peak_hp = 0
 sim = EngineSoundSimulator("sounds/engine_idle.wav")
-
-
+car_profile=tune
 # === Engine State ===
 rpm = IDLE_RPM
 gear = 0
 engine_on = False
+
+def generate_rpm_points(idle_rpm, max_rpm, step=700):
+    return np.arange(idle_rpm, max_rpm + 1, step)
+# === Constants for RPM and MAP axis points (for VE map) ===
+RPM_POINTS = generate_rpm_points(IDLE_RPM, MAX_RPM)
+MAP_PSI_POINTS = np.array([5, 10, 15, 20, 25, 30])  # MAP (psi) rows
+
+
+
+
+VE_MAP_FILE = tune_path
+ve_map = VEMap2D(RPM_POINTS, MAP_PSI_POINTS)
+try:
+    with open(VE_MAP_FILE, "r") as f:
+        json_str = f.read()
+    ve_map.from_json(json_str)
+except FileNotFoundError:
+    pass
+
+def create_engine_config_tuned(ve_map: VEMap2D):
+    return {
+        'displacement_l': 3.8,
+        'volumetric_efficiency': ve_map,
+        'boost_pressure_kpa': lambda rpm: (
+            101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
+        ),
+        'ignition_efficiency': lambda rpm: (
+            1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
+        ),
+        'afr': 14.0,
+        'air_density': 1.18,
+        'rpm_step': 50,
+        "max_boost_psi": 22.0,
+        "spool_rpm": 2200,
+        "full_boost_rpm": 3200,
+        "turbo_efficiency": 0.93,
+        "base_thermal_efficiency": 0.35,
+        "knock_ve_threshold": 0.95,
+        "knock_boost_threshold_kpa": 170.0,
+    }
+
+
+
 
 # === Log ===
 def log():
     msg = f"========\nTune:{TUNE_MODE}\nPeak RPM: {peak_rpm_recorded}\nTop Speed:{top_speed}\nPeak HorsePower: {peak_hp}\n0-60 mph: {time_0_60:.2f} s\n1/4 Mile: {time_qm:.2f} s, Speed: {speed_kph_at_qm:.1f}\n========\n"
     with open("log.txt", 'a') as file:
         file.write(msg)
-
-
-
-
 
 # === Engine Temp ===
 def calculate_engine_temp(rpm, throttle, boost_psi, speed, dt, engine_temp=70.0):
@@ -139,25 +261,25 @@ def calculate_engine_hp(rpm, torque_na, boost_psi):
     map_pressure = 14.7 + boost_psi
     boost_factor = map_pressure / 14.7
     torque_boosted = torque_na * boost_factor
-    horsepower = (torque_boosted * rpm) / 5252
+    horsepower = (torque_boosted * rpm) / 7127
     return horsepower
 
-# === Torque + HP Calculation with Boost ===
-def calculate_engine_torque_hp(rpm, throttle):
-    norm_rpm = max(min(rpm, MAX_RPM), IDLE_RPM)
-
-    if norm_rpm < peak_rpm:
-        torque_factor = norm_rpm / peak_rpm
+# === Torque + HP Calculation with Boost and VE Map ===
+def calculate_engine_torque_hp(rpm, throttle, boost_psi=None):
+    # Use VE map for more realistic torque curve
+    if boost_psi is None:
+        boost_psi = calculate_boost_psi(rpm, throttle)
+    map_kpa = psi_to_kpa(boost_psi)
+    ve = ve_map.get_ve(rpm, map_kpa)
+    # Use base torque as before, but scale by VE
+    if rpm < peak_rpm:
+        torque_factor = rpm / peak_rpm
     else:
-        torque_factor = max(0, 1 - (norm_rpm - peak_rpm) / (MAX_RPM - peak_rpm))
-
+        torque_factor = max(0, 1 - (rpm - peak_rpm) / (MAX_RPM - peak_rpm))
     base_torque = throttle * torque_factor * max_torque
-
-    boost_psi = calculate_boost_psi(norm_rpm, throttle)
-    horsepower = calculate_engine_hp(norm_rpm, base_torque, boost_psi)
-    torque_with_boost = base_torque * (1 + boost_psi / 14.7)
-
-    return torque_with_boost, horsepower, boost_psi
+    torque_with_ve = base_torque * ve
+    horsepower = (torque_with_ve * rpm) / 7127
+    return torque_with_ve, horsepower, boost_psi
 
 # === Speed Calculation ===
 def calculate_speed_kph(rpm, gear):
@@ -169,12 +291,10 @@ def calculate_speed_kph(rpm, gear):
     speed_mps = (wheel_rpm * wheel_circ) / 60
     return speed_mps * 3.6
 
-
 # == Estimate top speed ==
 def estimate_top_speed():
-    return round(calculate_speed_kph(MAX_RPM,6),-1)
-estp=estimate_top_speed()
-
+    return round(calculate_speed_kph(MAX_RPM, 6), -1)
+estp = estimate_top_speed()
 
 # === Acceleration Model ===
 def calculate_acceleration(torque_nm, gear):
@@ -209,9 +329,21 @@ def send_data_to_server(rpm: int, speed: float, temp: float, gear: int, boost: f
     except Exception as e:
         print(f"[ERROR] {e}")
 
+def play_turbo_async(sound_file):
+    threading.Thread(target=play_turbo, args=(sound_file,), daemon=True).start()
+
+def save_car_profile(car_profile):
+    with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\car_profile.json", "w") as f:
+        json.dump(car_profile, f, indent=2)
+    
+def open_ve_map():
+    save_car_profile(car_profile)
+    subprocess.Popen(["python", r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\dyno.py"])
+
+
 # === Main Loop ===
 def get_throttle_and_buttons():
-    turbo_release_cooldown=time.time()-1
+    turbo_release_cooldown = time.time() - 1
     engine_temp = 70.0
     global gear, rpm, engine_on, peak_hp, peak_rpm_recorded, top_speed
 
@@ -238,6 +370,7 @@ def get_throttle_and_buttons():
 
             pygame.event.pump()
 
+
             if not engine_on:
                 gear = 0
                 rpm = 0
@@ -247,7 +380,14 @@ def get_throttle_and_buttons():
                 torque = 0.0
                 send_data_to_server(rpm, speed, 0, gear, boost, hp, torque)
                 os.system("cls")
-                print("ENGINE OFF\nThrottle: 0%\nGear: N\nRPM: 0\nSpeed: 0.00 km/h")
+                print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
+                print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {speed:.2f}")
+                print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h")
+                print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Top Speed: {top_speed:>6.2f} km/h")
+                print(f"Peak RPM: {peak_rpm_recorded} | Peak HP: {peak_hp:.1f} | Distance: {distance:.2f} m")
+                print(f"Peak Speed: {top_speed:.1f} km/h | Peak Torque: {max_torque:.1f} Nm")
+                print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {boost:.1f} PSI")
+                sim.stop()
                 time.sleep(0.1)
                 continue
 
@@ -264,10 +404,10 @@ def get_throttle_and_buttons():
             if gear == 0 and clutch > 0.95 and joystick.get_button(LAUNCH_BUTTON_INDEX):
                 launch_mode_active = True
                 rpm = LAUNCH_CONTROL_RPM
-                throttle=0.7
+                throttle = 0.7
 
             turbo_release_pressed = joystick.get_button(3)
-            turbo_now=time.time()
+            turbo_now = time.time()
             if turbo_release_pressed and turbo_now > turbo_release_cooldown:
                 turbo_release_active = True
                 boost = 0
@@ -286,9 +426,6 @@ def get_throttle_and_buttons():
             # If turbo release active, torque is based on 0 boost
             if turbo_release_active:
                 torque = throttle * max_torque * (rpm / peak_rpm) if rpm < peak_rpm else 0
-
-
-
 
             if joystick.get_button(8) and clutch > 0.7:
                 if gear < 6:
@@ -328,14 +465,12 @@ def get_throttle_and_buttons():
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
             speed = update_speed(speed, acceleration, dt)
             speed_kph = calculate_speed_kph(rpm, gear)
-            distance+=(speed/3.6)*dt
+            distance += (speed / 3.6) * dt
             engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
             sim.update_rpm(rpm)
             send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
 
-
-
-            global speed_kph_at_qm,time_0_60
+            global speed_kph_at_qm, time_0_60
             if speed_kph > 3 and start_timer is None:
                 start_timer = time.time()
                 recorded_0_60 = False
@@ -351,7 +486,7 @@ def get_throttle_and_buttons():
                 global time_qm
                 time_qm = time.time() - start_timer
                 recorded_qm = True
-                speed_kph_at_qm=speed_kph
+                speed_kph_at_qm = speed_kph
 
             if recorded_0_60 and recorded_qm and not result_logged:
                 result_logged = True
@@ -365,19 +500,17 @@ def get_throttle_and_buttons():
                 distance = 0
 
 
-            os.system("cls")
-            print(f"Engine On: {engine_on}")
-            print(f"TUNE MODE: {TUNE_MODE.upper()}")
-            print(f"Throttle: {int(throttle * 100)}%")
-            print(f"RPM: {int(rpm)}")
-            print(f"Speed: {speed_kph:.2f} km/h")
-            print(f"Gear: {gear}")
-            print(f"Horsepower: {hp:.2f} HP")
-            print(f"Torque: {torque:.2f} Nm")
-            print(f"Boost: {boost:.1f} PSI")
-            print(f"Engine Temp: {engine_temp:.1f}°C")
-            print(f"Distance: {distance}")
-            
+            '''os.system("cls")
+            print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {speed:.2f}")
+            print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h")
+            print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Top Speed: {top_speed:>6.2f} km/h")
+            print(f"Peak RPM: {peak_rpm_recorded} | Peak HP: {peak_hp:.1f} | Distance: {distance:.2f} m")
+            print(f"Peak Speed: {top_speed:.1f} km/h | Peak Torque: {max_torque:.1f} Nm")
+            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {boost:.1f} PSI")'''
+
+            if result_logged:
+                print(f"0-60 mph: {time_0_60:.2f} s | 1/4 mi: {time_qm:.2f} s @ {speed_kph_at_qm:.1f} km/h")
 
             if rpm > peak_rpm_recorded:
                 peak_rpm_recorded = rpm
@@ -389,8 +522,11 @@ def get_throttle_and_buttons():
             prev_thr = throttle
             time.sleep(0.05)
 
-    except KeyboardInterrupt:
-        pygame.quit()
+    except Exception as e:
+        timestamp = time.time()
+        date = datetime.fromtimestamp(timestamp)
+        with open("errors.txt", 'a') as error_log:
+            error_log.write(f"{date.strftime('%H:%M:%S %d/%m/%y')} : {e}")
     finally:
         pygame.quit()
         sim.stop()
@@ -400,5 +536,3 @@ def get_throttle_and_buttons():
 if __name__ == "__main__":
     engine_on = True
     get_throttle_and_buttons()
-def play_turbo_async(sound_file):
-    threading.Thread(target=play_turbo, args=(sound_file,), daemon=True).start()
