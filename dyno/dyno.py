@@ -2,6 +2,7 @@ import sys
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QHBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox,QHeaderView
@@ -126,26 +127,26 @@ def simulate_dyno(car, engine, shift_rpms):
     all_therm_eff = []
     all_gears = []
 
-    num_gears = len(car['gear_ratios'])
+    num_gears = len(car['GEARS'])-1
 
     for gear_idx in range(num_gears):
         gear = gear_idx + 1
-        gear_ratio = car['gear_ratios'][gear_idx]
-        final_drive = car['final_drive_ratio']
+        gear_ratio = car['GEARS'].get(str(gear))
+        final_drive = car['final_drive']
 
         # Determine RPM range for this gear: from idle or previous shift RPM up to shift RPM or redline
         if gear_idx == 0:
-            rpm_start = car['idle_rpm']
+            rpm_start = car['IDLE_RPM']
         else:
             rpm_start = shift_rpms[gear_idx - 1]  # start at last shift RPM
 
         if gear_idx < len(shift_rpms):
-            rpm_end = min(shift_rpms[gear_idx], car['redline_rpm'])
+            rpm_end = min(shift_rpms[gear_idx], car['red_line'])
         else:
-            rpm_end = car['redline_rpm']
+            rpm_end = car['red_line']
 
         if rpm_end <= rpm_start:
-            rpm_end = car['redline_rpm']
+            rpm_end = car['red_line']
 
         rpm_values = np.arange(rpm_start, rpm_end + engine['rpm_step'], engine['rpm_step'], dtype=np.float64)
 
@@ -166,7 +167,7 @@ def simulate_dyno(car, engine, shift_rpms):
         boost_ratio = (boost_kpa + 101.325) / 101.325
 
         wheel_rpm = rpm_values / (gear_ratio * final_drive)
-        tire_circumference_m = car.get('tire_circumference_m', 2.05)
+        tire_circumference_m = 2*math.pi * (car['tire_diameter_m']/2)
         speed_mps = wheel_rpm * tire_circumference_m / 60.0
         speed_kph = speed_mps * 3.6
 
@@ -176,7 +177,7 @@ def simulate_dyno(car, engine, shift_rpms):
         turbo_efficiency = engine.get('turbo_efficiency', 0.93)
         effective_boost = boost_ratio * turbo_efficiency
 
-        torque_base = 200 + 100 * np.sin(np.pi * (rpm_values - car['idle_rpm']) / (car['redline_rpm'] - car['idle_rpm']))
+        torque_base = 200 + 100 * np.sin(np.pi * (rpm_values - car['IDLE_RPM']) / (car['red_line'] - car['IDLE_RPM']))
         torque = torque_base * ve * effective_boost
 
         torque_ftlbs = torque * 0.73756
@@ -217,9 +218,7 @@ def simulate_dyno(car, engine, shift_rpms):
     # Print peak torque and horsepower overall
     peak_torque_idx = np.argmax(all_torque)
     peak_hp_idx = np.argmax(all_hp)
-    print(f"Peak Torque: {all_torque[peak_torque_idx]:.2f} Nm at {all_rpm[peak_torque_idx]:.0f} RPM")
-    print(f"Peak Horsepower: {all_hp[peak_hp_idx]:.2f} HP at {all_rpm[peak_hp_idx]:.0f} RPM")
-    print(all_gears)
+
 
     return all_rpm, all_torque, all_hp, all_speed_kph, all_ve, all_boost_psi, all_ign_eff, all_therm_eff, all_gears
 
