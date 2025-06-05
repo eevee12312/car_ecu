@@ -1,0 +1,23 @@
+{
+  "MAX_RPM": 9200,
+  "IDLE_RPM": 1100,
+  "final_drive": 3.9,
+  "tire_diameter_m": 0.6,
+  "driveline_efficiency": 0.85,
+  "engine_inertia": 0.28,
+  "car_mass": 1680,
+  "GEARS": {
+    "0": 0,
+    "1": 3.9,
+    "2": 2.2,
+    "3": 1.55,
+    "4": 1.2,
+    "5": 0.95,
+    "6": 0.7
+  },
+  "peak_rpm": 5800,
+  "red_line": 6800,
+  "max_boost": 30.0,
+  "max_torque": 850,
+  "tune": "C:\\Users\\Owner\\Desktop\\ctf\\car_ecu\\dyno\\race_tune.json"
+}
