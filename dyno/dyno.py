@@ -249,7 +249,7 @@ def calculate_engine_torque_hp(rpm, throttle, boost_psi=None, ve_map=ve_map):
 
     # Estimate torque (Nm): Torque = (HP * 5252) / RPM
     if rpm > 0:
-        torque = (horsepower * 9549) / rpm
+        torque = (horsepower * 5252) / rpm
     else:
         torque = 0
 

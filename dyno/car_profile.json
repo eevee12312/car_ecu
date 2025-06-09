@@ -17,7 +17,7 @@
   },
   "peak_rpm": 5800,
   "red_line": 6800,
-  "max_boost": 30.0,
+  "max_boost": 33.0,
   "max_torque": 850,
   "tune": "C:\\Users\\Owner\\Desktop\\ctf\\car_ecu\\dyno\\race_tune.json"
 }

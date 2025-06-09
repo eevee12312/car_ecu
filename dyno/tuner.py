@@ -200,7 +200,7 @@ class MapEditor(QWidget):
             'VE': ('ve_grid', '%', self.color_ve, (30.0, 150.0)),
             'AFR': ('afr_grid', '', self.color_afr, (10.0, 18.0)),
             'Boost': ('boost_grid', 'psi', self.color_boost, (0.0, 35.0)),
-            'Thermal': ('thermal_grid', '°C', self.color_thermal, (0.0, 150.0)),
+            'Thermal': ('thermal_grid', '°C', self.color_thermal, (0.0, 1.0)),
         }
 
         self.tables = {}
@@ -247,7 +247,7 @@ class MapEditor(QWidget):
         return self.gradient_color(val, 0.0, 35.0)
 
     def color_thermal(self, val):
-        return self.gradient_color(val, 0.0, 150.0, color_low=(0, 0, 255), color_high=(255, 165, 0))
+        return self.gradient_color(val, 0.0, 1.0, color_low=(0, 0, 255), color_high=(255, 165, 0))
 
     def gradient_color(self, val, min_val, max_val, color_low=(0, 255, 0), color_high=(255, 0, 0)):
         val = np.clip(val, min_val, max_val)
@@ -305,22 +305,56 @@ class MapEditor(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed to load maps: {e}")
 
     def show_3d_map(self):
-        map_name = self.tabs.tabText(self.tabs.currentIndex())
-        grid_name, _, _, _ = self.maps[map_name]
-        grid = getattr(self.ve_map, grid_name)
+        for item in self.maps.items():
+            self.update_maps_from_tables()
+            
+            rpm = np.array(self.ve_map.rpm_points)
+            psi = np.array(self.ve_map.map_psi_points)
+            if item[1][0]=='ve_grid':
+                ve = np.array(self.ve_map.ve_grid) * 100  # Convert to %
+            elif item[1][0]=='afr_grid':
+                ve = np.array(self.ve_map.afr_grid) * 100  # Convert to %
+            elif item[1][0]=='boost_grid':
+                ve = np.array(self.ve_map.boost_grid) * 100  # Convert to %
+            elif item[1][0]=='thermal_grid':
+                ve = np.array(self.ve_map.thermal_grid) * 100  # Convert to %
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        X, Y = np.meshgrid(self.ve_map.rpm_points, self.ve_map.map_psi_points)
-        Z = grid if map_name != 'VE' else grid * 100
+            RPM, PSI = np.meshgrid(rpm, psi)
 
-        surf = ax.plot_surface(X, Y, Z, cmap=cm.viridis)
-        ax.set_xlabel("RPM")
-        ax.set_ylabel("MAP (psi)")
-        ax.set_zlabel(f"{map_name} Value")
-        ax.set_title(f"3D Surface - {map_name} Map")
-        fig.colorbar(surf, shrink=0.5, aspect=10)
-        plt.show()
+            fig = plt.figure(figsize=(10, 6), facecolor='black')
+            ax = fig.add_subplot(111, projection='3d', facecolor='black')
+
+            surf = ax.plot_surface(
+                RPM, PSI, ve,
+                cmap='jet',       # Similar to the image
+                edgecolor='k',    # Black wireframe
+                linewidth=0.3,
+                antialiased=True
+            )
+
+            ax.set_title(f"{item[1][0]}", color='white')
+            ax.set_xlabel("RPM", color='white')
+            ax.set_ylabel("MAP (psi)", color='white')
+            ax.set_zlabel("VE (%)", color='white')
+
+            # Set axis color
+            ax.tick_params(colors='white')
+            ax.xaxis.label.set_color('white')
+            ax.yaxis.label.set_color('white')
+            ax.zaxis.label.set_color('white')
+
+            # Grid & background
+            ax.xaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
+            ax.yaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
+            ax.zaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
+
+            # Add color bar
+            cbar = fig.colorbar(surf, shrink=0.5, aspect=10)
+            cbar.ax.yaxis.set_tick_params(color='white')
+            plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+
+            plt.tight_layout()
+            plt.show()
 
 
 
