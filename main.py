@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QDial, QPushButton, QGridLayout, QFrame, QSpacerItem, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
-from PyQt6.QtGui import QFont, QPalette, QLinearGradient, QBrush, QColor
+from PyQt6.QtGui import QFont, QPalette, QLinearGradient, QBrush, QColor,QPixmap
 
 
 import throttle
@@ -106,7 +106,7 @@ class ECUGUI(QMainWindow):
 
         threading.Thread(target=self.start_server, daemon=True).start()
         threading.Thread(target=self.monitor_ignition_button, daemon=True).start()
-
+        
     def monitor_ignition_button(self):
         pygame.init()
         pygame.joystick.init()

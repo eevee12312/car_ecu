@@ -4,7 +4,8 @@ import threading
 import socket
 import os
 from datetime import datetime
-from engine_sound_mine import play_turbo, EngineSoundSimulator
+from engine_sound_mine import play_turbo, EngineSoundSimulator, OtherEngineSoundSimulator
+
 import json
 import sys
 import numpy as np
@@ -153,7 +154,7 @@ TUNES = {
         
     },
 
-    "stage2": {  # ECU + turbo back exhaust tune
+    "stage2": {  # ECU + turbo back exhaust tune top speed 315
         "MAX_RPM": 8000,
         "IDLE_RPM": 850,
         "final_drive": 3.7,
@@ -177,7 +178,7 @@ TUNES = {
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
     },
 
-    "race": {  #top speed 352
+    "race": {  #top speed 381
         "MAX_RPM": 9200,
         "IDLE_RPM": 1100,
         "final_drive": 3.9,
@@ -196,7 +197,7 @@ TUNES = {
         },
         "peak_rpm": 5800,
         "red_line": 6800,
-        "max_boost": 30.0,
+        "max_boost": 33.0,
         "max_torque": 850,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
     }
@@ -226,6 +227,7 @@ peak_rpm_recorded = 0
 top_speed = 0
 peak_hp = 0
 sim = EngineSoundSimulator("sounds/engine_idle.wav")
+engine = OtherEngineSoundSimulator()
 car_profile=tune
 # === Engine State ===
 rpm = IDLE_RPM
@@ -305,13 +307,7 @@ def calculate_airflow(rpm, boost_psi, ve_map=ve_map):
     airflow = (ve * displacement_m3 * rpm * air_density) / (2 * 60)
     return airflow  # kg/s
 
-def calculate_thermal_efficiency(rpm, afr):
-    peak_rpm = 6500
-    max_efficiency = 0.38
-    rpm_eff = max_efficiency * np.exp(-((rpm - peak_rpm) / 1500) ** 2)
-    afr_penalty = 0.05 * abs(afr - 14.7) / 14.7
-    efficiency = rpm_eff - afr_penalty
-    return max(0.2, efficiency)  # clamp min 20%
+
 # === Engine Temp ===
 def calculate_engine_temp(rpm, throttle, boost_psi, speed, dt, engine_temp=70.0):
     ambient_temp = 24.0
@@ -331,13 +327,6 @@ def calculate_boost_psi(rpm, throttle):
     ramp = min(1, (rpm - 2000) / (MAX_RPM - 2000))
     return throttle * max_boost * ramp
 
-# === HP Calculation ===
-def calculate_engine_hp(rpm, torque_na, boost_psi):
-    map_pressure = 14.7 + boost_psi
-    boost_factor = map_pressure / 14.7
-    torque_boosted = torque_na * boost_factor
-    horsepower = (torque_boosted * rpm) / 9549
-    return horsepower
 
 # === Torque + HP Calculation with Boost and VE Map ===
 def calculate_engine_torque_hp(rpm, throttle, boost_psi=None, ve_map=ve_map):
@@ -446,6 +435,7 @@ def get_throttle_and_buttons():
     joystick = pygame.joystick.Joystick(0)
     joystick.init()
     sim.start()
+    engine.start()
     peak_torque=0
     peak_hp_recorded=0
     peak_hp_rpm=0
@@ -566,6 +556,7 @@ def get_throttle_and_buttons():
             distance += (speed / 3.6) * dt
             engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
             sim.update_rpm(rpm)
+            engine.set_rpm(rpm)
             send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
 
             global speed_kph_at_qm, time_0_60
@@ -606,11 +597,11 @@ def get_throttle_and_buttons():
 
             os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
-            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {speed:.2f}")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed_kph/3.6):.2f}")
             print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h")
-            print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
+            print(f"Torque: {torque:>6.1f} Pf  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
             print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
-            print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost))}")
+            print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f}")
 
             if result_logged:
                 print(f"0-60 mph: {time_0_60:.2f} s | 1/4 mi: {time_qm:.2f} s @ {speed_kph_at_qm:.1f} km/h")
@@ -633,11 +624,15 @@ def get_throttle_and_buttons():
     finally:
         pygame.quit()
         sim.stop()
+        engine.stop()
         log()
+
+
+
+
 
 
 # === Entry Point ===
 if __name__ == "__main__":
     engine_on = True
     get_throttle_and_buttons()
-

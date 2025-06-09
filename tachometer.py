@@ -12,7 +12,7 @@ class CircularGauge(QWidget):
         self.min_value = min_value
         self.max_value = max_value
         self.value = min_value
-
+        
         self.start_angle=225
         self.sweep_angle=270
 

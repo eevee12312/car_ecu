@@ -1,64 +1,8 @@
 ========
-Tune:stock
-Peak RPM: 6999.999999999996
-Top Speed:276.37589189189174
-Peak HorsePower: 403.5386438040768
-0-60 mph: 3.25 s
-1/4 Mile: 29.71 s, Speed: 276.4
-========
-========
 Tune:stage2
-Peak RPM: 7999.99986724207
-Top Speed:315.8581569205777
-Peak HorsePower: 546.823170188107
-0-60 mph: 2.98 s
-1/4 Mile: 20.68 s, Speed: 315.9
-========
-========
-Tune:race
-Peak RPM: 9199.970905246497
-Top Speed:381.1335639022733
-Peak HorsePower: 779.7509492408599
-0-60 mph: 2.98 s
-1/4 Mile: 13.70 s, Speed: 380.5
-========
-========
-Tune:race
-Peak RPM: 9199.999326825533
-Top Speed:381.13474134270456
-Peak HorsePower: 780.7292992015364
-0-60 mph: 4.51 s
-1/4 Mile: 14.59 s, Speed: 380.2
-========
-========
-Tune:race
-Peak RPM: 9199.993260773183
-Top Speed:381.1344900401542
-Peak HorsePower: 775.5824370880355
-0-60 mph: 2.93 s
-1/4 Mile: 13.96 s, Speed: 379.6
-========
-========
-Tune:race
-Peak RPM: 9200.0
-Top Speed:360.0806280693395
-Peak HorsePower: 778.4884453911917
-0-60 mph: 6.63 s
-1/4 Mile: 12.47 s, Speed: 329.8
-========
-========
-Tune:race
-Peak RPM: 9199.999999994312
-Top Speed:381.1347692305336
-Peak HorsePower: 781.330214324012
-0-60 mph: 2.88 s
-1/4 Mile: 15.17 s, Speed: 380.9
-========
-========
-Tune:race
-Peak RPM: 9200
-Top Speed:381.1347692307692
-Peak HorsePower: 1525.0628286862698
-0-60 mph: 4.19 s
-1/4 Mile: 10.57 s, Speed: 381.1
+Peak RPM: 8000
+Top Speed:315.85816216216216
+Peak HorsePower: 370.4711867145783
+0-60 mph: 4.94 s
+1/4 Mile: 22.03 s, Speed: 315.9
 ========
