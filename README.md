@@ -33,6 +33,7 @@ A Python-based real-time simulator of the legendary **VR38DETT** engine from the
 
 ---
 Note: file paths are not fully modular
+Currently working on: ignition timing map
 
 To install dependencies run:
 pip install -r packages.txt
