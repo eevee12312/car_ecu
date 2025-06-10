@@ -32,7 +32,7 @@ A Python-based real-time simulator of the legendary **VR38DETT** engine from the
   - Integrates with PyQt6-based circular RPM gauge and digital speedometer
 
 ---
-
+Note: file paths are not fully modular
 
 To install dependencies run:
 pip install -r packages.txt
