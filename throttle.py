@@ -126,7 +126,7 @@ def psi_to_kpa(psi):
 
 
 # Options: "stock", "upgraded"
-TUNE_MODE = "hayabusa"  # Change this to select different tunes
+TUNE_MODE = "race"  # Change this to select different tunes
 
 TUNES = {
     "stock": {  # Top speed ~276 km/h
@@ -150,7 +150,8 @@ TUNES = {
         "red_line": 5800,
         "max_boost": 17.0,  # psi
         "max_torque": 652,  # Nm (Stock VR38DETT in Nismo trim)
-        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json"
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json",
+        "engine_name": "VR38DETT",
         
     },
 
@@ -176,6 +177,7 @@ TUNES = {
         "max_boost": 22.0,
         "max_torque": 720,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
+        "engine_name": "VR38DETT",
     },
 
     "race": {  #top speed 381
@@ -200,30 +202,7 @@ TUNES = {
         "max_boost": 33.0,
         "max_torque": 850,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
-    },
-
-    "drag": {
-        "MAX_RPM": 11000,
-        "IDLE_RPM": 1200,
-        "final_drive": 3.5,
-        "tire_diameter_m": 0.65,  # wider tires for drag
-        "driveline_efficiency": 0.9,
-        "engine_inertia": 0.25,
-        "car_mass": 1600,
-        "GEARS": {
-            0: 0,
-            1: 4.00,
-            2: 2.50,
-            3: 1.80,
-            4: 1.40,
-            5: 1.10,
-            6: 0.85
-        },
-        "peak_rpm": 5800,
-        "red_line": 8500,
-        "max_boost": 35.0,
-        "max_torque": 1000,
-        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\drag_tune.json",
+        "engine_name": "VR38DETT",
     },
     "lfa": {
         "MAX_RPM": 9500,
@@ -247,6 +226,7 @@ TUNES = {
         "max_boost": 33.0,
         "max_torque": 480,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json",
+        "engine_name": "lfa",
     },
     "hayabusa": {
         "MAX_RPM": 11750,
@@ -270,6 +250,7 @@ TUNES = {
         "max_boost": 33.0,  # No boost for NA engine
         "max_torque": 500,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json",
+        "engine_name": "hayabusa",
     }
 
     
@@ -290,6 +271,7 @@ max_boost = tune["max_boost"]
 max_torque = tune["max_torque"]
 red_line = tune["red_line"]
 tune_path=tune['tune']
+engine_name = tune["engine_name"]
 LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
 LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 logged = False
@@ -324,90 +306,60 @@ try:
 except FileNotFoundError:
     pass
 
-def create_engine_config_tuned(ve_map: EngineTuneMap2D):
-    mode="hayabusa"
-    engines={
-        "hayabusa":{
-            # Engine basics
-            'displacement_l': 1.3,
-            'cylinders': 4,
-            # Airflow
-            'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
-            'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
-            # Boost target (optional, if used)
-            'boost_target_psi': lambda rpm: np.interp(
-                rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
-            ),  # Or define your own boost curve
-            # Other parameters
-            'boost_pressure_kpa': lambda rpm: (
-                101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
-            ),
-            'air_density': 1.18,
-            # Combustion
-            'ignition_efficiency': lambda rpm: (
-                1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
-            ),
-            'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
-            'fuel_density': 0.760,  # kg/L
-            'fuel_energy_mj': 45,   # MJ/kg
-            # Turbo
-            'max_boost_psi': 33.0,
-            'spool_rpm': 2200,
-            'full_boost_rpm': 7000,
-            'turbo_efficiency': 0.93,
-            # Efficiency
-            'base_thermal_efficiency': 0.35,
-            'knock_ve_threshold': 0.95,
-            'knock_boost_threshold_kpa': 170.0,
-        },
-        "lfa":{
-            # Engine basics
-            'displacement_l': 4.8,
-            'cylinders': 10,
 
-            # Airflow
-            'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
-            'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
+function_map = {
+    "ve_map.get_ve": lambda rpm, map_kpa, ve_map: ve_map.get_ve(rpm, map_kpa),
+    "ve_map.get_afr": lambda rpm, map_kpa, ve_map: ve_map.get_afr(rpm, map_kpa),
+    "ve_map.get_thermal_load": lambda rpm, map_kpa, ve_map: ve_map.get_thermal_load(rpm, map_kpa),
+    "custom_boost_curve": lambda rpm, ve_map: custom_boost_curve(rpm, ve_map),
+    "custom_boost_pressure": lambda rpm: custom_boost_pressure(rpm),
+    "custom_ignition_efficiency": lambda rpm: custom_ignition_efficiency(rpm),
+}
 
-            # Boost target (optional, if used)
-            'boost_target_psi': lambda rpm: np.interp(
-                rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
-            ),  # Or define your own boost curve
 
-            # Other parameters
-            'boost_pressure_kpa': lambda rpm: (
-                101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
-            ),
-            'air_density': 1.18,
 
-            # Combustion
-            'ignition_efficiency': lambda rpm: (
-                1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
-            ),
-            'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
-            'fuel_density': 0.760,  # kg/L
-            'fuel_energy_mj': 45,   # MJ/kg
+def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
+    with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\engine_profiles.json", "r") as f:
+        raw_config=json.load(f)[engine_name]
+    config = {}
+    for key, value in raw_config.items():
+        if isinstance(value, str) and value.startswith("function:"):
+            func_name=value[len("function:"):]
+            if func_name not in function_map:
+                raise ValueError(f"Function '{func_name}' not found in function_map")
+            
+            if "ve_map" in func_name:
+                # If the function also needs map_kpa as input
+                if "map_kpa" in function_map[func_name].__code__.co_varnames:
+                    config[key] = lambda rpm, map_kpa, fn=function_map[func_name]: fn(rpm, map_kpa, ve_map)
+                else:
+                    # Only rpm and ve_map
+                    config[key] = lambda rpm, fn=function_map[func_name]: fn(rpm, ve_map)
+            else:
+                # Just use the function as-is (no ve_map needed)
+                config[key] = function_map[func_name]
+        else:
+            # Regular value, store directly
+            config[key] = value
 
-            # Turbo
-            'max_boost_psi': 22.0,
-            'spool_rpm': 2200,
-            'full_boost_rpm': 6500,
-            'turbo_efficiency': 0.93,
+    return config
 
-            # Efficiency
-            'base_thermal_efficiency': 0.35,
-            'knock_ve_threshold': 0.95,
-            'knock_boost_threshold_kpa': 170.0,
-        }
-    }
-    return engines[mode]
 
-config = create_engine_config_tuned(ve_map)
+def custom_boost_curve(rpm, ve_map):
+    return np.interp(rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points))
+
+def custom_boost_pressure(rpm):
+    return 101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
+
+def custom_ignition_efficiency(rpm):
+    return 1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
+
+config= load_engine_config(engine_name, ve_map)
 
 def log():
     msg = f"========\nTune:{TUNE_MODE}\nPeak RPM: {peak_rpm_recorded}\nTop Speed:{top_speed}\nPeak HorsePower: {peak_hp}\n0-60 mph: {time_0_60:.2f} s\n1/4 Mile: {time_qm:.2f} s, Speed: {speed_kph_at_qm:.1f}\n========\n"
-    with open("log.txt", 'a') as file:
-        file.write(msg)
+    #with open("log.txt", 'a') as file:
+    #    file.write(msg)
 def calculate_airflow(rpm, boost_psi, ve_map=ve_map):
     map_kpa = psi_to_kpa(boost_psi) 
     ve = config['volumetric_efficiency'](rpm, map_kpa)
@@ -468,15 +420,16 @@ def calculate_engine_torque_hp(rpm, throttle, boost_psi_input=None, ve_map=ve_ma
     friction_power_watts = c0 + (c1 * rpm) + (c2 * rpm**2) + (c3 * rpm**3)
     
     power_watts -= friction_power_watts
-    power_watts = max(0, power_watts) 
+    power_watts = max(0, power_watts)
 
-    horsepower = power_watts / 745.7
+
 
     if rpm > 0:
-        torque = (5252 * horsepower) / rpm
+        torque=((power_watts/1000)/rpm)*9550
     else:
         torque = 0
 
+    horsepower = (torque * rpm) / 7127
     torque *= throttle
 
     return torque, horsepower, boost_psi,power_watts
@@ -601,7 +554,12 @@ def get_throttle_and_buttons():
 
             # === Throttle ===
             throttle = (-joystick.get_axis(2) + 1) / 2
-            clutch = (-joystick.get_axis(1))
+            if -joystick.get_axis(1)>0:
+                clutch = (-joystick.get_axis(1))
+                brake=0
+            else:
+                clutch = 0
+                brake = -joystick.get_axis(1)
 
             # === Gear Input ===
             shifted = False
@@ -716,10 +674,10 @@ def get_throttle_and_buttons():
                 peak_hp_rpm=rpm
 
             os.system("cls")
-            print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
+            print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f} | Brake: {brake:.2f}")
             print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed):.2f}")
             print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
-            print(f"Torque: {torque:>6.1f} Pf  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
+            print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
             print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} : {boost} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
             print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f}")
             send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
