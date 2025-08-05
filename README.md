@@ -37,3 +37,5 @@ Currently working on:
 
 To install dependencies run:
 pip install -r packages.txt
+
+Last Date of update: 5th augest 2025
