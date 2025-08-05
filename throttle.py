@@ -283,7 +283,7 @@ LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 logged = False
 air_density = 1.225  # kg/m^3 at sea level, 15°C
 gravity = 9.81  # m/s^2
-
+friction_coeff=0.2
 global peak_hp, peak_rpm_recorded, top_speed
 peak_rpm_recorded = 0
 top_speed = 0
@@ -627,8 +627,9 @@ def get_throttle_and_buttons():
 
             if launch_mode_active:
                 rpm = LAUNCH_CONTROL_RPM  # Maintain set RPM for launch
-            elif throttle < 0.8 and not shifted:
-                rpm -= (rpm - IDLE_RPM) * ((1 - throttle) * 0.2)
+            elif throttle < 0.1 and not shifted:
+                rpm_drop=friction_coeff * (rpm- IDLE_RPM) / engine_inertia
+                rpm -= rpm_drop * dt
             else:
                 rpm += torque * engine_inertia
 
