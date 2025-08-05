@@ -469,14 +469,17 @@ def calculate_acceleration(torque_nm, gear,rpm,speed):
     total_resistance = drag_force + rolling_resistance
 
     net_force = force - total_resistance
-    net_force = max(0, net_force)  # No negative force
 
     acceleration=net_force/car_mass
     return acceleration
 
 # === Speed Update ===
-def update_speed(current_speed, acceleration, dt):
-    return current_speed + acceleration * dt
+def update_speed(current_speed, acceleration, rpm,gear, dt):
+    ns=current_speed+acceleration * dt
+    rpm_limit_speed=calculate_speed_kph(rpm, gear)
+    if ns*3.6 > rpm_limit_speed:
+        ns = rpm_limit_speed / 3.6
+    return ns
 
 # === Gear Shifting Logic ===
 def shift_gear(new_gear, rpm, prev_gear):
@@ -631,16 +634,16 @@ def get_throttle_and_buttons():
 
             if clutch < 0.1:
                 torque = torque
-                speed = update_speed(speed, acceleration, dt)
+                speed = update_speed(speed, acceleration, rpm,gear, dt)
             elif clutch < 0.7:
                 torque *= (1 - clutch * 1.2)
-                speed = update_speed(speed, acceleration * (1 - clutch * 1.2), dt)
+                speed = update_speed(speed, acceleration * (1 - clutch * 1.2),rpm,gear, dt)
             else:
                 torque = 0
                 speed = speed
 
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
-            speed = update_speed(speed, acceleration, dt)
+            speed = update_speed(speed, acceleration,rpm,gear, dt)
             speed_kph=calculate_speed_kph(rpm, gear)
             distance += (speed_kph / 3.6) * dt
             engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
@@ -685,7 +688,7 @@ def get_throttle_and_buttons():
 
             os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
-            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed):.2f}")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed*3.6):.2f}")
             print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
             print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} : {boost} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
