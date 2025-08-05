@@ -152,6 +152,7 @@ TUNES = {
         "max_torque": 652,  # Nm (Stock VR38DETT in Nismo trim)
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json",
         "engine_name": "VR38DETT",
+        "frontal_area": 2.2,  # m^2, typical for a sports car
         
     },
 
@@ -178,6 +179,7 @@ TUNES = {
         "max_torque": 720,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
         "engine_name": "VR38DETT",
+        "frontal_area": 2.2,  # m^2, typical for a sports car
     },
 
     "race": {  #top speed 381
@@ -203,6 +205,7 @@ TUNES = {
         "max_torque": 850,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
         "engine_name": "VR38DETT",
+        "frontal_area": 2.2,  # m^2, typical for a sports car
     },
     "lfa": {
         "MAX_RPM": 9500,
@@ -227,6 +230,7 @@ TUNES = {
         "max_torque": 480,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json",
         "engine_name": "lfa",
+        "frontal_area": 2.0,  # m^2, typical for a sports car
     },
     "hayabusa": {
         "MAX_RPM": 11750,
@@ -251,6 +255,7 @@ TUNES = {
         "max_torque": 500,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json",
         "engine_name": "hayabusa",
+        "frontal_area": 0.8,  # m^2, typical for a motorcycle
     }
 
     
@@ -271,10 +276,13 @@ max_boost = tune["max_boost"]
 max_torque = tune["max_torque"]
 red_line = tune["red_line"]
 tune_path=tune['tune']
+frontal_area=tune["frontal_area"]
 engine_name = tune["engine_name"]
 LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
 LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 logged = False
+air_density = 1.225  # kg/m^3 at sea level, 15°C
+gravity = 9.81  # m/s^2
 
 global peak_hp, peak_rpm_recorded, top_speed
 peak_rpm_recorded = 0
@@ -450,13 +458,21 @@ def estimate_top_speed():
 estp = estimate_top_speed()
 
 # === Acceleration Model ===
-def calculate_acceleration(torque_nm, gear):
+def calculate_acceleration(torque_nm, gear,rpm,speed):
     gear_ratio = GEARS.get(gear, 3.214)
     if gear_ratio == 0:
         return 0
     wheel_torque = torque_nm * gear_ratio * final_drive * driveline_efficiency
     force = wheel_torque / (tire_diameter_m / 2)
-    return force / car_mass
+    drag_force=0.5*air_density*0.32*frontal_area* speed**2
+    rolling_resistance = 0.015 * car_mass * gravity
+    total_resistance = drag_force + rolling_resistance
+
+    net_force = force - total_resistance
+    net_force = max(0, net_force)  # No negative force
+
+    acceleration=net_force/car_mass
+    return acceleration
 
 # === Speed Update ===
 def update_speed(current_speed, acceleration, dt):
@@ -554,12 +570,7 @@ def get_throttle_and_buttons():
 
             # === Throttle ===
             throttle = (-joystick.get_axis(2) + 1) / 2
-            if -joystick.get_axis(1)>0:
-                clutch = (-joystick.get_axis(1))
-                brake=0
-            else:
-                clutch = 0
-                brake = -joystick.get_axis(1)
+            clutch = (-joystick.get_axis(1))
 
             # === Gear Input ===
             shifted = False
@@ -609,7 +620,7 @@ def get_throttle_and_buttons():
 
             # === Engine Physics ===
             torque, hp, boost,power = calculate_engine_torque_hp(rpm, throttle)
-            acceleration = calculate_acceleration(torque, gear)
+            acceleration = calculate_acceleration(torque, gear,rpm,speed)
 
             if launch_mode_active:
                 rpm = LAUNCH_CONTROL_RPM  # Maintain set RPM for launch
@@ -631,8 +642,7 @@ def get_throttle_and_buttons():
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
             speed = update_speed(speed, acceleration, dt)
             speed_kph=calculate_speed_kph(rpm, gear)
-            spped_display_ksh = speed* 3.6
-            distance += (speed / 3.6) * dt
+            distance += (speed_kph / 3.6) * dt
             engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
             sim.update_rpm(rpm)
             engine.set_rpm(rpm)
@@ -674,12 +684,12 @@ def get_throttle_and_buttons():
                 peak_hp_rpm=rpm
 
             os.system("cls")
-            print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f} | Brake: {brake:.2f}")
+            print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
             print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed):.2f}")
             print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
             print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} : {boost} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
-            print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f}")
+            print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f} | acceleration: {acceleration:.2f} m/s²")
             send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
 
             if result_logged:
