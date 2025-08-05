@@ -303,6 +303,7 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
         gear = gear_idx + 1
         gear_ratio = car['GEARS'][str(gear)]
         final_drive = car['final_drive']
+        car['red_line']=car['MAX_RPM']
 
         # RPM Range
         rpm_start = car['IDLE_RPM'] if gear_idx == 0 else shift_rpms[gear_idx - 1]

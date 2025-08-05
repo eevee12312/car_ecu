@@ -367,7 +367,7 @@ def get_car_profile():
 
 
 def start():
-    filename=r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json"
+    filename=r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\drag_tune.json"
 
 
     try:

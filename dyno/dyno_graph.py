@@ -131,45 +131,82 @@ class EngineTuneMap2D:
 
 # === Engine config tuned style using the VEMap2D instance ===
 def create_engine_config_tuned(ve_map: EngineTuneMap2D):
-    return {
-        # Engine basics
-        'displacement_l': 3.8,
-        'cylinders': 6,
+    mode="hayabusa"  # or "lfa" for the other engine
+    engines={
+        "hayabusa":{
+            # Engine basics
+            'displacement_l': 1.3,
+            'cylinders': 4,
+            # Airflow
+            'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
+            'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
+            # Boost target (optional, if used)
+            'boost_target_psi': lambda rpm: np.interp(
+                rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
+            ),  # Or define your own boost curve
+            # Other parameters
+            'boost_pressure_kpa': lambda rpm: (
+                101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
+            ),
+            'air_density': 1.18,
+            # Combustion
+            'ignition_efficiency': lambda rpm: (
+                1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
+            ),
+            'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
+            'fuel_density': 0.760,  # kg/L
+            'fuel_energy_mj': 45,   # MJ/kg
+            # Turbo
+            'max_boost_psi': 33.0,
+            'spool_rpm': 2200,
+            'full_boost_rpm': 7000,
+            'turbo_efficiency': 0.93,
+            # Efficiency
+            'base_thermal_efficiency': 0.35,
+            'knock_ve_threshold': 0.95,
+            'knock_boost_threshold_kpa': 170.0,
+        },
+        "lfa":{
+            # Engine basics
+            'displacement_l': 4.8,
+            'cylinders': 10,
 
-        # Airflow
-        'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
-        'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
+            # Airflow
+            'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
+            'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
 
-        # Boost target (optional, if used)
-        'boost_target_psi': lambda rpm: np.interp(
-            rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
-        ),  # Or define your own boost curve
+            # Boost target (optional, if used)
+            'boost_target_psi': lambda rpm: np.interp(
+                rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
+            ),  # Or define your own boost curve
 
-        # Other parameters
-        'boost_pressure_kpa': lambda rpm: (
-            101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
-        ),
-        'air_density': 1.18,
+            # Other parameters
+            'boost_pressure_kpa': lambda rpm: (
+                101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
+            ),
+            'air_density': 1.18,
 
-        # Combustion
-        'ignition_efficiency': lambda rpm: (
-            1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
-        ),
-        'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
-        'fuel_density': 0.760,  # kg/L
-        'fuel_energy_mj': 45,   # MJ/kg
+            # Combustion
+            'ignition_efficiency': lambda rpm: (
+                1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
+            ),
+            'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
+            'fuel_density': 0.760,  # kg/L
+            'fuel_energy_mj': 45,   # MJ/kg
 
-        # Turbo
-        'max_boost_psi': 33.0,
-        'spool_rpm': 2200,
-        'full_boost_rpm': 6500,
-        'turbo_efficiency': 0.93,
+            # Turbo
+            'max_boost_psi': 22.0,
+            'spool_rpm': 2200,
+            'full_boost_rpm': 6500,
+            'turbo_efficiency': 0.93,
 
-        # Efficiency
-        'base_thermal_efficiency': 0.35,
-        'knock_ve_threshold': 0.95,
-        'knock_boost_threshold_kpa': 170.0,
+            # Efficiency
+            'base_thermal_efficiency': 0.35,
+            'knock_ve_threshold': 0.95,
+            'knock_boost_threshold_kpa': 170.0,
+        }
     }
+    return engines[mode]
 
 ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
 # === Dyno simulation function uses engine_config_tuned ===
@@ -249,7 +286,7 @@ def calculate_engine_torque_hp(rpm, throttle, boost_psi=None, ve_map=ve_map):
 
     # Estimate torque (Nm): Torque = (HP * 5252) / RPM
     if rpm > 0:
-        torque = (horsepower * 9549) / rpm
+        torque = (horsepower * 5252) / rpm
     else:
         torque = 0
 
