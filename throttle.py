@@ -688,12 +688,12 @@ def get_throttle_and_buttons():
 
             os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
-            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed*3.6):.2f}")
-            print(f"Speed: {speed_kph:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed):.2f}")
+            print(f"Speed: {speed*3.6:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
             print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} : {boost} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
             print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f} | acceleration: {acceleration:.2f} m/s²")
-            send_data_to_server(int(rpm), speed_kph, engine_temp, gear, boost, hp, torque)
+            send_data_to_server(int(rpm), speed*3.6, engine_temp, gear, boost, hp, torque)
 
             if result_logged:
                 print(f"0-60 mph: {time_0_60:.2f} s | 1/4 mi: {time_qm:.2f} s @ {speed_kph_at_qm:.1f} km/h")
