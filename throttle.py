@@ -81,20 +81,16 @@ class EngineTuneMap2D:
         return v0 + y_frac * (v1 - v0)
 
     def get_ve(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.ve_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.ve_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_afr(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.afr_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.afr_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_target_boost_psi(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.boost_target_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.boost_target_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_thermal_load(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.thermal_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.thermal_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def to_json(self):
         return json.dumps({
@@ -109,7 +105,7 @@ class EngineTuneMap2D:
     def from_json(self, json_str):
         data = json.loads(json_str)
         self.rpm_points = np.array(data['rpm_points'])
-        self.map_psi_points = np.array(data['map_psi_points'])
+        self.map_psi_points = np.array(data['map_kpa_points'])
         self.ve_grid = np.array(data['ve_grid'])
         self.afr_grid = np.array(data['afr_grid'])
         self.boost_target_grid = np.array(data['boost_grid'])
@@ -119,7 +115,7 @@ class EngineTuneMap2D:
 
 
 def psi_to_kpa(psi):
-    return 101.3 + psi * 6.89476
+    return 101.3 + (psi * 6.89476)
 
 # === Example: Load VE map from file or use default ===
 
@@ -176,7 +172,7 @@ TUNES = {
         "red_line": 6500,
         "max_boost": 22.0,
         "max_torque": 720,
-        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
         "engine_name": "VR38DETT",
         "frontal_area": 2.2,  # m^2, typical for a sports car
     },
@@ -304,9 +300,11 @@ engine_name = tune["engine_name"]
 LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
 LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 logged = False
+
 air_density = 1.225  # kg/m^3 at sea level, 15°C
 gravity = 9.81  # m/s^2
 friction_coeff=0.2
+
 global peak_hp, peak_rpm_recorded, top_speed
 peak_rpm_recorded = 0
 top_speed = 0
@@ -319,14 +317,14 @@ rpm = IDLE_RPM
 gear = 0
 engine_on = False
 
+
+
+# === Engine Config and Modules ===
 def generate_rpm_points(idle_rpm, max_rpm, step=700):
     return np.arange(idle_rpm, max_rpm + 1, step)
 # === Constants for RPM and MAP axis points (for VE map) ===
 RPM_POINTS = generate_rpm_points(IDLE_RPM, MAX_RPM)
 MAP_PSI_POINTS = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35]) 
-
-
-
 
 VE_MAP_FILE = tune_path
 ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
@@ -337,17 +335,14 @@ try:
 except FileNotFoundError:
     pass
 
-
 function_map = {
     "ve_map.get_ve": lambda rpm, map_kpa, ve_map: ve_map.get_ve(rpm, map_kpa),
     "ve_map.get_afr": lambda rpm, map_kpa, ve_map: ve_map.get_afr(rpm, map_kpa),
     "ve_map.get_thermal_load": lambda rpm, map_kpa, ve_map: ve_map.get_thermal_load(rpm, map_kpa),
     "custom_boost_curve": lambda rpm, ve_map: custom_boost_curve(rpm, ve_map),
-    "custom_boost_pressure": lambda rpm: custom_boost_pressure(rpm),
+    "ve_map.get_target_boost_psi": lambda rpm, map_kpa, ve_map: ve_map.get_target_boost_psi(rpm, map_kpa),
     "custom_ignition_efficiency": lambda rpm: custom_ignition_efficiency(rpm),
 }
-
-
 
 def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
     with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\engine_profiles.json", "r") as f:
@@ -375,7 +370,6 @@ def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
 
     return config
 
-
 def custom_boost_curve(rpm, ve_map):
     return np.interp(rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points))
 
@@ -389,42 +383,95 @@ config= load_engine_config(engine_name, ve_map)
 
 def log():
     msg = f"========\nTune:{TUNE_MODE}\nPeak RPM: {peak_rpm_recorded}\nTop Speed:{top_speed}\nPeak HorsePower: {peak_hp}\n0-60 mph: {time_0_60:.2f} s\n1/4 Mile: {time_qm:.2f} s, Speed: {speed_kph_at_qm:.1f}\n========\n"
-    #with open("log.txt", 'a') as file:
-    #    file.write(msg)
+    with open("log.txt", 'a') as file:
+        file.write(msg)
+
+
+
+# === Physics functions ===
+
+def abs_kpa_to_psi(kpa):
+    return max((kpa - 101.3) / 6.89476,0)
+
+# === Engine Temp Calculation (Realistic Model) ===
+def update_engine_temperature(dt, throttle, rpm, speed, boost_pressure, ambient_temp):
+    global engine_temp
+
+    # Constants
+    engine_mass_kg = 180  # typical engine mass
+    coolant_mass_kg = 8   # typical coolant mass
+    engine_specific_heat = 500  # J/kg·K (cast iron/aluminum)
+    coolant_specific_heat = 3800  # J/kg·K (water/glycol mix)
+    total_heat_capacity = (engine_mass_kg * engine_specific_heat) + (coolant_mass_kg * coolant_specific_heat)
+
+    # Heat generation
+    combustion_heat = throttle * calculate_airflow(rpm, boost_pressure) * 44e6 * 0.25 * dt  # 44MJ/kg fuel, 25% to heat
+    friction_heat = (rpm / MAX_RPM) ** 2 * 500 * dt  # friction increases with rpm
+    turbo_heat = max(boost_pressure, 0) * 100 * dt   # turbo adds heat under boost
+
+    heat_generated = combustion_heat + friction_heat + turbo_heat
+
+    # Cooling system
+    # Radiator effectiveness increases with speed and thermostat opening
+    thermostat_temp = 90
+    fan_on_temp = 105
+    max_radiator_kw = 40  # max cooling power in kW
+    radiator_eff = min(1.0, speed / 60.0 + 0.2)  # more speed = more airflow
+    thermostat_open = min(1.0, max(0.0, (engine_temp - thermostat_temp) / 20))
+    fan_active = engine_temp > fan_on_temp
+
+    # Cooling power (Watts)
+    cooling_power = max_radiator_kw * 1000 * (thermostat_open * radiator_eff + 0.5 * fan_active)
+    # Heat loss to ambient (convection/radiation)
+    ambient_loss = (engine_temp - ambient_temp) * 15 * dt
+
+    # Net heat change
+    net_heat = heat_generated - (cooling_power * dt) - ambient_loss
+
+    # Update temperature
+    delta_temp = net_heat / total_heat_capacity
+    engine_temp += delta_temp
+
+    # Clamp temperature
+    engine_temp = max(ambient_temp, engine_temp)
+
+    return engine_temp
+
+# === Airflow Calculation ===
 def calculate_airflow(rpm, boost_psi, ve_map=ve_map):
-    map_kpa = psi_to_kpa(boost_psi) 
+    map_kpa = boost_psi 
     ve = config['volumetric_efficiency'](rpm, map_kpa)
     displacement_m3 = config['displacement_l'] / 1000
     air_density = config['air_density']
     airflow = (ve * displacement_m3 * rpm * air_density) / (2 * 60) 
     return airflow  
 
-# === Engine Temp Calculation ===
-def update_engine_temperature(dt, throttle, rpm, speed, boost_pressure, ambient_temp):
-    global engine_temp
-    combustion_heat = throttle * (calculate_airflow(rpm,boost_pressure)*ve_map.get_afr(rpm,psi_to_kpa(boost_pressure))) * 150
-    friction_heat = (rpm / 8000) ** 2 * 0.03
-    turbo_heat = max(boost_pressure, 0) * 30
-
-    heat_generated = combustion_heat + friction_heat + turbo_heat
-
-    fan_active = engine_temp > 105
-    thermostat_open = min(1.0, max(0.0, (engine_temp - 92) / 20))
-
-    cooling_rate = (engine_temp - ambient_temp) * (0.7 * thermostat_open + fan_active * 0.5)
-    cooling_rate *= (speed / calculate_speed_kph(MAX_RPM,6)) + 0.5
-
-    delta_temp = (heat_generated - cooling_rate) / 900
-    engine_temp += delta_temp * dt
-
-    return engine_temp
 
 # --- Boost Calculation (Simplified for real-time simulation) ---
+def calculate_turbo_lag(rpm, throttle, map_kpa,boost_pressure,dt):
+    if rpm < config['spool_rpm']:
+        return 0
+    
+    target_boost_kpa = ve_map.get_target_boost_psi(rpm, map_kpa)
+    boost_diff=target_boost_kpa - boost_pressure
+    if abs(boost_diff) < 0.1:
+        boost_pressure = target_boost_kpa
+    else:
+        th_factor=throttle**1.3
+        ramp_factor = np.clip((rpm - config['spool_rpm']) / (config['full_boost_rpm'] - config['spool_rpm']), 0, 1)
+        intertia_mod=1.0 if boost_diff > 0 else 2.5
+
+        effective_spool=psi_to_kpa(0.10)*th_factor*ramp_factor / intertia_mod
+        boost_pressure += boost_diff * min(dt * effective_spool,1.0)
+    return boost_pressure
+
+
 def calculate_boost_psi_interactive(rpm, throttle):
     if rpm < config['spool_rpm']:
         return 0
     ramp_factor = np.clip((rpm - config['spool_rpm']) / (config['full_boost_rpm'] - config['spool_rpm']), 0, 1)
-    target_boost = config['max_boost_psi'] * throttle 
+    max_boost_kpa = psi_to_kpa(config['max_boost_psi'])
+    target_boost = max_boost_kpa * throttle 
     return target_boost * ramp_factor
 
 # --- Torque + HP Calculation with Boost and VE Map ---
@@ -432,9 +479,9 @@ def calculate_engine_torque_hp(rpm, throttle, boost_psi_input=None, ve_map=ve_ma
     if boost_psi_input is None:
         boost_psi = calculate_boost_psi_interactive(rpm, throttle)
     else:
-        boost_psi = boost_psi_input
+        boost_psi = calculate_turbo_lag(rpm, throttle, boost_psi,boost_psi, dt=0.01)
         
-    map_kpa = psi_to_kpa(boost_psi)
+    map_kpa = boost_psi
     
     ve = config['volumetric_efficiency'](rpm, map_kpa)
     afr = config['afr'](rpm, map_kpa)
@@ -521,6 +568,9 @@ def shift_gear(new_gear, rpm, prev_gear):
         return IDLE_RPM
     return max(IDLE_RPM, min(rpm * (new_ratio / prev_ratio), MAX_RPM))
 
+
+
+
 # === Data Sender ===
 def send_data_to_server(rpm: int, speed: float, temp: float, gear: int, boost: float, hp: float, torque: float, host='127.0.0.1', port=9999):
     try:
@@ -532,6 +582,9 @@ def send_data_to_server(rpm: int, speed: float, temp: float, gear: int, boost: f
         print("[ERROR] Server not found")
     except Exception as e:
         print(f"[ERROR] {e}")
+
+
+
 
 def play_turbo_async(sound_file):
     threading.Thread(target=play_turbo, args=(sound_file,), daemon=True).start()
@@ -603,23 +656,25 @@ def get_throttle_and_buttons():
                 time.sleep(0.1)
                 continue
 
-            # === Throttle ===
+            # === Throttle & Clutch Input ===
             throttle = (-joystick.get_axis(2) + 1) / 2
-            clutch = (-joystick.get_axis(1))
+            clutch = -joystick.get_axis(1)
 
-            # === Gear Input ===
+            # === Gear Tracking ===
             shifted = False
             prev_gear = gear
 
             # === Launch Control ===
-            launch_mode_active = False
-            if gear == 0 and clutch > 0.95 and joystick.get_button(LAUNCH_BUTTON_INDEX):
-                launch_mode_active = True
+            launch_mode_active = (
+                gear == 0 and clutch > 0.95 and joystick.get_button(LAUNCH_BUTTON_INDEX)
+            )
+            if launch_mode_active:
                 rpm = LAUNCH_CONTROL_RPM
                 throttle = 0.7
 
-            turbo_release_pressed = joystick.get_button(3)
+            # === Turbo Release (Flutter) Logic ===
             turbo_now = time.time()
+            turbo_release_pressed = joystick.get_button(3)
             if turbo_release_pressed and turbo_now > turbo_release_cooldown:
                 turbo_release_active = True
                 boost = 0
@@ -627,18 +682,18 @@ def get_throttle_and_buttons():
                 turbo_release_cooldown = turbo_now + 1.0  # 1 sec cooldown
             else:
                 turbo_release_active = False
-                # calculate boost normally
-                _, _, boost,_ = calculate_engine_torque_hp(rpm, throttle)
+                _, _, boost, _ = calculate_engine_torque_hp(rpm, throttle)
 
-            # If turbo release active, force boost=0
+            # Override boost to 0 if turbo release is active
             if turbo_release_active:
                 boost = 0
 
-            torque, hp, _,power = calculate_engine_torque_hp(rpm, throttle)
-            # If turbo release active, torque is based on 0 boost
+            # === Torque & HP Calculation ===
+            torque, hp, _, power = calculate_engine_torque_hp(rpm, throttle)
             if turbo_release_active:
                 torque = throttle * max_torque * (rpm / peak_rpm) if rpm < peak_rpm else 0
 
+            # === Gear Shifting ===
             if joystick.get_button(8) and clutch > 0.7:
                 if gear < len(GEARS) - 1:
                     gear += 1
@@ -654,37 +709,43 @@ def get_throttle_and_buttons():
                     time.sleep(0.2)
 
             # === Engine Physics ===
-            torque, hp, boost,power = calculate_engine_torque_hp(rpm, throttle)
-            acceleration = calculate_acceleration(torque, gear,rpm,speed)
+            torque, hp, boost, power = calculate_engine_torque_hp(rpm, throttle)
+            acceleration = calculate_acceleration(torque, gear, rpm, speed)
 
             if launch_mode_active:
-                rpm = LAUNCH_CONTROL_RPM  # Maintain set RPM for launch
+                rpm = LAUNCH_CONTROL_RPM
             elif throttle < 0.1 and not shifted:
-                rpm_drop=friction_coeff * (rpm- IDLE_RPM) / engine_inertia
+                rpm_drop = friction_coeff * (rpm - IDLE_RPM) / engine_inertia
                 rpm -= rpm_drop * dt
             else:
                 rpm += torque * engine_inertia
 
+            # === Clutch Behavior ===
             if clutch < 0.1:
-                torque = torque
-                speed = update_speed(speed, acceleration, rpm,gear, dt)
+                speed = update_speed(speed, acceleration, rpm, gear, dt)
             elif clutch < 0.7:
-                torque *= (1 - clutch * 1.2)
-                speed = update_speed(speed, acceleration * (1 - clutch * 1.2),rpm,gear, dt)
+                factor = 1 - clutch * 1.2
+                torque *= factor
+                speed = update_speed(speed, acceleration * factor, rpm, gear, dt)
             else:
-                torque = 0
-                speed = speed
+                torque = 0  # Fully disengaged clutch
 
+            # === RPM & Speed Limits ===
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
-            speed = update_speed(speed, acceleration,rpm,gear, dt)
-            speed_kph=calculate_speed_kph(rpm, gear)
-            distance += (speed ) * dt
-            engine_temp = update_engine_temperature(dt,throttle, rpm, speed, boost, 20.0)
+            speed = update_speed(speed, acceleration, rpm, gear, dt)
+            speed_kph = calculate_speed_kph(rpm, gear)
 
+            # === Distance & Engine Temperature ===
+            distance += speed * dt
+            engine_temp = update_engine_temperature(dt, throttle, rpm, speed, boost, 20.0)
+
+            # === Update External Sim State ===
             sim.update_rpm(rpm)
             engine.set_rpm(rpm)
 
+            # === Performance Timers ===
             global speed_kph_at_qm, time_0_60
+
             if speed_kph > 3 and start_timer is None:
                 start_timer = time.time()
                 recorded_0_60 = False
@@ -692,11 +753,11 @@ def get_throttle_and_buttons():
                 result_logged = False
                 distance = 0
 
-            if start_timer and not recorded_0_60 and speed*3.6 >= 96.5:
+            if start_timer and not recorded_0_60 and speed * 3.6 >= 96.5:  # ~60 mph
                 time_0_60 = time.time() - start_timer
                 recorded_0_60 = True
 
-            if start_timer and not recorded_qm and distance >= 402.0:
+            if start_timer and not recorded_qm and distance >= 402.0:  # Quarter mile
                 global time_qm
                 time_qm = time.time() - start_timer
                 recorded_qm = True
@@ -705,7 +766,7 @@ def get_throttle_and_buttons():
             if recorded_0_60 and recorded_qm and not result_logged:
                 result_logged = True
 
-            # Reset when stopped
+            # === Reset Timer When Stopped ===
             if speed_kph < 2 and start_timer:
                 start_timer = None
                 recorded_0_60 = False
@@ -713,12 +774,15 @@ def get_throttle_and_buttons():
                 result_logged = False
                 distance = 0
 
-            if peak_torque < torque:
-                peak_torque=torque
-                peak_torque_rpm=rpm
-            if peak_hp_recorded < hp:
-                peak_hp_recorded=hp
-                peak_hp_rpm=rpm
+            # === Peak Power Tracking ===
+            if torque > peak_torque:
+                peak_torque = torque
+                peak_torque_rpm = rpm
+
+            if hp > peak_hp_recorded:
+                peak_hp_recorded = hp
+                peak_hp_rpm = rpm
+
 
 
 
@@ -726,11 +790,12 @@ def get_throttle_and_buttons():
 
             os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
-            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {abs_kpa_to_psi(boost):.2f} PSI | Manifold Pressure: {boost:.2f} kPa")
             print(f"Speed: {speed*3.6:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Power: {power/1000:.1f} KW")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
-            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f} | Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f} | acceleration: {acceleration:.2f} m/s²")
-            send_data_to_server(int(rpm), speed*3.6, engine_temp, gear, boost, hp, torque)
+            print(f"VE: {ve_map.get_ve(rpm, boost):.2f} | AFR: {ve_map.get_afr(rpm, boost):.2f} | Airflow: {calculate_airflow(rpm,boost):.2f} KG/s | Thermal efficiency: {ve_map.get_thermal_load(rpm,boost):.2f} | acceleration: {acceleration:.2f} m/s²")
+            print(f"Boost Map: {ve_map.get_target_boost_psi(rpm, boost):.2f} Kpa | Turbo laged: {calculate_turbo_lag(rpm, throttle, boost,boost, dt):.2f} Kpa")
+            send_data_to_server(int(rpm), speed*3.6, engine_temp, gear, abs_kpa_to_psi(boost), hp, torque)
 
             if result_logged:
                 print(f"0-60 mph: {time_0_60:.2f} s | 1/4 mi: {time_qm:.2f} s @ {speed_kph_at_qm:.1f} km/h")
@@ -749,7 +814,7 @@ def get_throttle_and_buttons():
         timestamp = time.time()
         date = datetime.fromtimestamp(timestamp)
         with open("errors.txt", 'a') as error_log:
-            error_log.write(f"{date.strftime('%H:%M:%S %d/%m/%y')} : {e}")
+            error_log.write(f"{date.strftime('%H:%M:%S %d/%m/%y')} : {e}\n")
     finally:
         pygame.quit()
         sim.stop()
