@@ -130,46 +130,50 @@ class EngineTuneMap2D:
 
 
 # === Engine config tuned style using the VEMap2D instance ===
-def create_engine_config_tuned(ve_map: EngineTuneMap2D):
-    return {
-        # Engine basics
-        'displacement_l': 3.8,
-        'cylinders': 6,
 
-        # Airflow
-        'volumetric_efficiency': lambda rpm, map_kpa: ve_map.get_ve(rpm, map_kpa),
-        'afr': lambda rpm, map_kpa: ve_map.get_afr(rpm, map_kpa),
+function_map = {
+    "ve_map.get_ve": lambda rpm, map_kpa, ve_map: ve_map.get_ve(rpm, map_kpa),
+    "ve_map.get_afr": lambda rpm, map_kpa, ve_map: ve_map.get_afr(rpm, map_kpa),
+    "ve_map.get_thermal_load": lambda rpm, map_kpa, ve_map: ve_map.get_thermal_load(rpm, map_kpa),
+    "custom_boost_curve": lambda rpm, ve_map: custom_boost_curve(rpm, ve_map),
+    "custom_boost_pressure": lambda rpm: custom_boost_pressure(rpm),
+    "custom_ignition_efficiency": lambda rpm: custom_ignition_efficiency(rpm),
+}
 
-        # Boost target (optional, if used)
-        'boost_target_psi': lambda rpm: np.interp(
-            rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points)
-        ),  # Or define your own boost curve
+def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
+    with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\engine_profiles.json", "r") as f:
+        raw_config=json.load(f)[engine_name]
+    config = {}
+    for key, value in raw_config.items():
+        if isinstance(value, str) and value.startswith("function:"):
+            func_name=value[len("function:"):]
+            if func_name not in function_map:
+                raise ValueError(f"Function '{func_name}' not found in function_map")
+            
+            if "ve_map" in func_name:
+                # If the function also needs map_kpa as input
+                if "map_kpa" in function_map[func_name].__code__.co_varnames:
+                    config[key] = lambda rpm, map_kpa, fn=function_map[func_name]: fn(rpm, map_kpa, ve_map)
+                else:
+                    # Only rpm and ve_map
+                    config[key] = lambda rpm, fn=function_map[func_name]: fn(rpm, ve_map)
+            else:
+                # Just use the function as-is (no ve_map needed)
+                config[key] = function_map[func_name]
+        else:
+            # Regular value, store directly
+            config[key] = value
 
-        # Other parameters
-        'boost_pressure_kpa': lambda rpm: (
-            101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
-        ),
-        'air_density': 1.18,
+    return config
 
-        # Combustion
-        'ignition_efficiency': lambda rpm: (
-            1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
-        ),
-        'thermal_efficiency':lambda rpm, map_kpa: ve_map.get_thermal_load(rpm,map_kpa),
-        'fuel_density': 0.760,  # kg/L
-        'fuel_energy_mj': 45,   # MJ/kg
+def custom_boost_curve(rpm, ve_map):
+    return np.interp(rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points))
 
-        # Turbo
-        'max_boost_psi': 33.0,
-        'spool_rpm': 2200,
-        'full_boost_rpm': 6500,
-        'turbo_efficiency': 0.93,
+def custom_boost_pressure(rpm):
+    return 101.3 + 100 * np.clip((rpm - 2500) / 4000, 0, 1)
 
-        # Efficiency
-        'base_thermal_efficiency': 0.35,
-        'knock_ve_threshold': 0.95,
-        'knock_boost_threshold_kpa': 170.0,
-    }
+def custom_ignition_efficiency(rpm):
+    return 1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
 
 ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
 from PyQt6.QtWidgets import (
@@ -367,16 +371,14 @@ def get_car_profile():
 
 
 def start():
-    filename=r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\drag_tune.json"
-
-
+    filename=r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json"
     try:
         with open(filename, "r") as f:
             json_str = f.read()
         ve_map.from_json(json_str)
-        print("Loaded VE map from r35_tune.json")
+        print(f"Loaded VE map from {filename.split("\\")[-1]}")
     except FileNotFoundError:
-        print("r35_tune.json not found, using default VE map.")
+        print(f"{filename.split("\\")[-1]} not found, using default VE map.")
 
     app = QApplication(sys.argv)
     editor = MapEditor(ve_map)
@@ -386,6 +388,7 @@ def start():
 # Run the CLI entry point
 if __name__ == "__main__":
     car_profile=get_car_profile()
+    engine_name=car_profile["engine_name"]
     ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
-    config = create_engine_config_tuned(ve_map)
+    config = load_engine_config(engine_name,ve_map)
     start()
