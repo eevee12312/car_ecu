@@ -125,11 +125,10 @@ def psi_to_kpa(psi):
 
 
 
-# Options: "stock", "upgraded"
-TUNE_MODE = "race"  # Change this to select different tunes
+TUNE_MODE = "stage4"  # Change this to select different tunes
 
-TUNES = {
-    "stock": {  # Top speed ~276 km/h
+TUNES = { 
+    "stock": { #274 horsepower  
         "MAX_RPM": 7000,
         "IDLE_RPM": 800,
         "final_drive": 3.7,
@@ -156,7 +155,7 @@ TUNES = {
         
     },
 
-    "stage2": {  # ECU + turbo back exhaust tune top speed 315
+    "stage2": {  #375 horsepower
         "MAX_RPM": 8000,
         "IDLE_RPM": 850,
         "final_drive": 3.7,
@@ -182,14 +181,14 @@ TUNES = {
         "frontal_area": 2.2,  # m^2, typical for a sports car
     },
 
-    "race": {  #top speed 381
+    "race": {  #1000 horsepower
         "MAX_RPM": 9200,
         "IDLE_RPM": 1100,
         "final_drive": 3.9,
         "tire_diameter_m": 0.60,  # semi-slicks or drag radials
         "driveline_efficiency": 0.85,
         "engine_inertia": 0.28,
-        "car_mass": 1680,
+        "car_mass": 1500,
         "GEARS": {
             0: 0,
             1: 3.90,
@@ -199,7 +198,7 @@ TUNES = {
             5: 0.95,
             6: 0.70
         },
-        "peak_rpm": 6000,
+        "peak_rpm": 6800,
         "red_line": 7500,
         "max_boost": 33.0,
         "max_torque": 850,
@@ -207,32 +206,56 @@ TUNES = {
         "engine_name": "VR38DETT",
         "frontal_area": 2.2,  # m^2, typical for a sports car
     },
-    "lfa": {
-        "MAX_RPM": 9500,
+    "stage4": { #1900 horsepower
+        "MAX_RPM": 10000,
         "IDLE_RPM": 900,
-        "final_drive": 3.42,
-        "tire_diameter_m": 0.5,  # wider tires for drag
-        "driveline_efficiency": 0.9,
-        "engine_inertia": 0.55,
-        "car_mass": 1480,
+        "final_drive": 4.11,
+        "tire_diameter_m": 0.7,  # wider tires for drag
+        "driveline_efficiency": 0.95,
+        "engine_inertia": 0.30,
+        "car_mass": 1300,
         "GEARS": {
             0: 0,
-            1: 3.23,
-            2: 2.19,
-            3: 1.61,
-            4: 1.23,
-            5: 0.97,
-            6: 0.80
+            1: 3.21,
+            2: 2.1,
+            3: 1.5,
+            4: 1.1,
+            5: 0.9,
+            6: 0.7
         },
-        "peak_rpm": 5800,
+        "peak_rpm": 7000,
         "red_line": 8500,
-        "max_boost": 33.0,
-        "max_torque": 480,
+        "max_boost": 58.0,
+        "max_torque": 900,
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json",
-        "engine_name": "lfa",
-        "frontal_area": 2.0,  # m^2, typical for a sports car
+        "engine_name": "VR38",
+        "frontal_area": 1.9,  # m^2, typical for a sports car
     },
-    "hayabusa": {
+    "rally":{
+        "MAX_RPM": 8500,
+        "IDLE_RPM": 800,
+        "final_drive": 4.44,
+        "tire_diameter_m": 0.65,  # Rally tires
+        "driveline_efficiency": 0.9,
+        "engine_inertia": 0.65,
+        "car_mass": 1180,
+        "GEARS": {
+            0: 0,
+            1: 4.11,
+            2: 2.36,
+            3: 1.69,
+            4: 1.5,
+            5: 1.2
+        },
+        "peak_rpm": 6000,
+        "red_line": 7500,
+        "max_boost": 20.0,  # Rally cars often run lower boost
+        "max_torque": 100,  # Nm
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\stage2_tune.json",
+        "engine_name": "Rally",
+        "frontal_area": 2.0,  # m^2, typical for a rally car
+    },
+    "hayabusa": { #468 horsepower
         "MAX_RPM": 11750,
         "IDLE_RPM": 900,
         "final_drive": 2.389,
@@ -377,14 +400,23 @@ def calculate_airflow(rpm, boost_psi, ve_map=ve_map):
     return airflow  
 
 # === Engine Temp Calculation ===
-def calculate_engine_temp(rpm, throttle, boost_psi, speed, dt, engine_temp=70.0):
-    ambient_temp = 24.0
-    heating_rate = (rpm / MAX_RPM) * throttle * (1 + boost_psi / 14.7) * 20
-    cooling_rate = (speed / 200) * 10 + 5
+def update_engine_temperature(dt, throttle, rpm, speed, boost_pressure, ambient_temp):
+    global engine_temp
+    combustion_heat = throttle * (calculate_airflow(rpm,boost_pressure)*ve_map.get_afr(rpm,psi_to_kpa(boost_pressure))) * 150
+    friction_heat = (rpm / 8000) ** 2 * 0.03
+    turbo_heat = max(boost_pressure, 0) * 30
 
-    temp_change = heating_rate - cooling_rate
-    engine_temp += temp_change * dt
-    engine_temp = max(ambient_temp, min(engine_temp, 120.0))
+    heat_generated = combustion_heat + friction_heat + turbo_heat
+
+    fan_active = engine_temp > 105
+    thermostat_open = min(1.0, max(0.0, (engine_temp - 92) / 20))
+
+    cooling_rate = (engine_temp - ambient_temp) * (0.7 * thermostat_open + fan_active * 0.5)
+    cooling_rate *= (speed / calculate_speed_kph(MAX_RPM,6)) + 0.5
+
+    delta_temp = (heat_generated - cooling_rate) / 900
+    engine_temp += delta_temp * dt
+
     return engine_temp
 
 # --- Boost Calculation (Simplified for real-time simulation) ---
@@ -454,7 +486,7 @@ def calculate_speed_kph(rpm, gear):
 
 # == Estimate top speed ==
 def estimate_top_speed():
-    return round(calculate_speed_kph(MAX_RPM, 6), -1)
+    return round(calculate_speed_kph(MAX_RPM, len(GEARS)-1), -1)
 estp = estimate_top_speed()
 
 # === Acceleration Model ===
@@ -516,9 +548,9 @@ def open_ve_map():
 
 
 
-
 def get_throttle_and_buttons():
     turbo_release_cooldown = time.time() - 1
+    global engine_temp
     engine_temp = 70.0
     global gear, rpm, engine_on, peak_hp, peak_rpm_recorded, top_speed
 
@@ -608,7 +640,7 @@ def get_throttle_and_buttons():
                 torque = throttle * max_torque * (rpm / peak_rpm) if rpm < peak_rpm else 0
 
             if joystick.get_button(8) and clutch > 0.7:
-                if gear < 6:
+                if gear < len(GEARS) - 1:
                     gear += 1
                     rpm = shift_gear(gear, rpm, prev_gear)
                     shifted = True
@@ -646,8 +678,9 @@ def get_throttle_and_buttons():
             rpm = max(IDLE_RPM, min(rpm, MAX_RPM))
             speed = update_speed(speed, acceleration,rpm,gear, dt)
             speed_kph=calculate_speed_kph(rpm, gear)
-            distance += (speed_kph / 3.6) * dt
-            engine_temp = calculate_engine_temp(rpm, throttle, boost, speed, dt, engine_temp)
+            distance += (speed ) * dt
+            engine_temp = update_engine_temperature(dt,throttle, rpm, speed, boost, 20.0)
+
             sim.update_rpm(rpm)
             engine.set_rpm(rpm)
 
@@ -659,7 +692,7 @@ def get_throttle_and_buttons():
                 result_logged = False
                 distance = 0
 
-            if start_timer and not recorded_0_60 and speed_kph >= 96.5:
+            if start_timer and not recorded_0_60 and speed*3.6 >= 96.5:
                 time_0_60 = time.time() - start_timer
                 recorded_0_60 = True
 
@@ -687,13 +720,16 @@ def get_throttle_and_buttons():
                 peak_hp_recorded=hp
                 peak_hp_rpm=rpm
 
+
+
+
+
             os.system("cls")
             print(f"Tune: {TUNE_MODE} |Throttle: {throttle:.2f} | Clutch: {clutch:.2f}")
-            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI | m/s: {(speed):.2f}")
-            print(f"Speed: {speed*3.6:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Estimated Top Speed: {estp:.1f} km/h | Power: {power:.1f} W")
+            print(f"Gear: {gear if gear > 0 else 'N'} | RPM: {int(rpm):>4} | Boost: {boost:>4.1f} PSI")
+            print(f"Speed: {speed*3.6:.1f} km/h | Temp: {engine_temp:>5.1f} °C | Power: {power/1000:.1f} KW")
             print(f"Torque: {torque:>6.1f} Nm  | HP: {hp:>6.1f} | Peak Torque: {peak_torque:.2f} at {peak_torque_rpm:.1f} RPM | Peak Hp: {peak_hp_recorded:.2f} at {peak_hp_rpm:.1f} RPM")
-            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | Boost: {ve_map.get_target_boost_psi(rpm,psi_to_kpa(boost)):.1f} : {boost} PSI | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f}")
-            print(f"Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f} | acceleration: {acceleration:.2f} m/s²")
+            print(f"VE: {ve_map.get_ve(rpm, psi_to_kpa(boost)):.2f} | AFR: {ve_map.get_afr(rpm, psi_to_kpa(boost)):.2f} | Airflow: {calculate_airflow(rpm,boost):.2f} | Thermal efficiency: {ve_map.get_thermal_load(rpm,psi_to_kpa(boost)):.2f} | acceleration: {acceleration:.2f} m/s²")
             send_data_to_server(int(rpm), speed*3.6, engine_temp, gear, boost, hp, torque)
 
             if result_logged:
