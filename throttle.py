@@ -474,6 +474,10 @@ def calculate_boost_psi_interactive(rpm, throttle):
     target_boost = max_boost_kpa * throttle 
     return target_boost * ramp_factor
 
+
+
+
+
 # --- Torque + HP Calculation with Boost and VE Map ---
 def calculate_engine_torque_hp(rpm, throttle, boost_psi_input=None, ve_map=ve_map):
     if boost_psi_input is None:
