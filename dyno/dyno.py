@@ -127,14 +127,13 @@ class EngineTuneMap2D:
 
 
 
-
 # === Engine config tuned style using the VEMap2D instance ===
 function_map = {
     "ve_map.get_ve": lambda rpm, map_kpa, ve_map: ve_map.get_ve(rpm, map_kpa),
     "ve_map.get_afr": lambda rpm, map_kpa, ve_map: ve_map.get_afr(rpm, map_kpa),
     "ve_map.get_thermal_load": lambda rpm, map_kpa, ve_map: ve_map.get_thermal_load(rpm, map_kpa),
     "custom_boost_curve": lambda rpm, ve_map: custom_boost_curve(rpm, ve_map),
-    "custom_boost_pressure": lambda rpm: custom_boost_pressure(rpm),
+    "ve_map.get_target_boost_psi": lambda rpm, map_kpa, ve_map: ve_map.get_target_boost_psi(rpm, map_kpa),
     "custom_ignition_efficiency": lambda rpm: custom_ignition_efficiency(rpm),
 }
 
@@ -175,6 +174,7 @@ def custom_boost_pressure(rpm):
 
 def custom_ignition_efficiency(rpm):
     return 1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
+
 
 ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
 # === Dyno simulation function uses engine_config_tuned ===
@@ -315,7 +315,6 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
         gear = gear_idx + 1
         gear_ratio = car['GEARS'][str(gear)]
         final_drive = car['final_drive']
-        car['red_line']=car['MAX_RPM']
 
         # RPM Range
         rpm_start = car['IDLE_RPM'] if gear_idx == 0 else shift_rpms[gear_idx - 1]
@@ -324,21 +323,6 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
             rpm_end = car['red_line']
         rpm_values = np.arange(rpm_start, rpm_end + engine['rpm_step'], engine['rpm_step'], dtype=np.float64)
 
-        # Twin turbo boost function
-        def twin_turbo_spool(rpm_val):
-            max_boost = engine.get('max_boost_psi', 22.0)
-            spool_rpm = engine.get('spool_rpm', 2200)
-            full_boost_rpm = engine.get('full_boost_rpm', 3200)
-            if rpm_val < spool_rpm:
-                return 0.0
-            elif rpm_val >= full_boost_rpm:
-                return max_boost
-            else:
-                return max_boost * (rpm_val - spool_rpm) / (full_boost_rpm - spool_rpm)
-
-        boost_psi = np.array([twin_turbo_spool(r) for r in rpm_values])
-        boost_kpa = boost_psi * 6.89476
-        boost_ratio = (boost_kpa + 101.325) / 101.325
 
         wheel_rpm = rpm_values / (gear_ratio * final_drive)
         tire_circumference_m = 2 * math.pi * (car['tire_diameter_m'] / 2)
@@ -352,12 +336,12 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
         ign_eff = []
         therm_eff = []
         temp_log = []
+        boost=[]
 
         for i, rpm in enumerate(rpm_values):
-            psi = boost_psi[i]
-            tq, hp_val, _, power_w = calculate_engine_torque_hp(rpm, throttle, psi, ve_map)
+            tq, hp_val, psi,_ = calculate_engine_torque_hp(rpm, throttle)
             v = ve_map.get_ve(rpm, psi)
-            afr = config['afr'](rpm, psi_to_kpa(psi))
+            afr = config['afr'](rpm, psi)
             therm = calculate_thermal_efficiency(rpm, afr,psi)
             ign = engine['ignition_efficiency'](rpm)
             speed = speed_kph[i]
@@ -366,6 +350,7 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
             torque.append(tq)
             hp.append(hp_val)
             ve.append(v)
+            boost.append(psi)
             ign_eff.append(ign)
             therm_eff.append(therm)
             temp_log.append(engine_temp)
@@ -376,7 +361,7 @@ def simulate_dyno(car, engine, shift_rpms, ve_map):
         all_hp.append(hp)
         all_speed_kph.append(speed_kph)
         all_ve.append(ve)
-        all_boost_psi.append(boost_psi)
+        all_boost_psi.append(boost)
         all_ign_eff.append(ign_eff)
         all_therm_eff.append(therm_eff)
         all_engine_temp.append(temp_log)
@@ -494,6 +479,8 @@ def plot_dyno(rpm, tq, hp, speed, ve, boost, ign_eff, therm_eff, gears, afr=None
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
     plt.savefig(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\dyno.png")
+    print(f"Horsepower: {hp.max():.2f} HP at {rpm[np.argmax(hp)]:.0f} RPM")
+    print(f"Peak Torque: {tq.max():.2f} Nm at {rpm[np.argmax(tq)]:.0f} RPM")
 
 
 
@@ -540,8 +527,10 @@ class VEMapEditor(QWidget):
         self.btn_run.clicked.connect(self.run_dyno)
 
     def load_ve_map_to_table(self):
-        for i in range(len(self.ve_map.map_psi_points)):
-            for j in range(len(self.ve_map.rpm_points)):
+        rows= len(self.ve_map.map_psi_points)
+        cols = len(self.ve_map.rpm_points)
+        for i in range(rows):
+            for j in range(cols):
                 ve_val = self.ve_map.ve_grid[i, j] * 100
                 item = QTableWidgetItem(f"{ve_val:.2f}")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -571,7 +560,7 @@ class VEMapEditor(QWidget):
                 item = self.table.item(i, j)
                 try:
                     val = float(item.text())
-                    val = np.clip(val, 30.0, 150.0) / 100.0
+                    val = np.clip(val, 30.0, 150.0) / 100
                     self.ve_map.ve_grid[i, j] = val
                 except Exception:
                     pass
@@ -598,12 +587,12 @@ class VEMapEditor(QWidget):
         car_profile = get_car_profile()
         car_profile['current_gear']=1
         engine_config = load_engine_config(engine_name,self.ve_map)
-        shifts = [7500, 7800, 8100, 8300, 8400]
+        shifts = [8600,8000, 7800, 7700, 7900]
         rpm, torque, hp, speed_kph, ve, boost_psi, ign_eff, therm_eff, gears,engine_temp = simulate_dyno(car_profile, engine_config, shifts, ve_map)
         # Get AFR from VE map for rpm and boost psi:
-        afr = np.array([engine_config['afr'](r, b * 6.89476) for r, b in zip(rpm, boost_psi)])
+        afr = np.array([engine_config['afr'](r, b) for r, b in zip(rpm, boost_psi)])
 
-        plot_dyno(rpm, torque, hp, speed_kph, ve, boost_psi * 6.89476, ign_eff, therm_eff, gears, afr)
+        plot_dyno(rpm, torque, hp, speed_kph, ve, boost_psi, ign_eff, therm_eff, gears, afr)
         tuning_assistant(car_profile, engine_config)
 
 
@@ -614,10 +603,12 @@ class VEMapEditor(QWidget):
         psi = np.array(self.ve_map.map_psi_points)
         ve = np.array(self.ve_map.ve_grid) * 100  # Convert to %
 
+        # Do NOT reverse RPM axis; keep low RPM closer, high RPM farther
         RPM, PSI = np.meshgrid(rpm, psi)
 
         fig = plt.figure(figsize=(10, 6), facecolor='black')
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
+        ax.invert_xaxis()
 
         surf = ax.plot_surface(
             RPM, PSI, ve,
@@ -655,7 +646,7 @@ class VEMapEditor(QWidget):
 
 # === Tuning assistant ===
 def tuning_assistant(car_profile, engine_config):
-    shifts = [7500, 7800, 8100, 8300, 8400]
+    shifts = [8600,8000, 7800, 7700, 7900]  # Example shift points
     rpm, torque, hp, speed, ve, boost, ign_eff, therm_eff,gears,temp = simulate_dyno(car_profile, engine_config, shifts,ve_map)
 
     print("=== Tuning Assistant ===")
@@ -726,8 +717,8 @@ def start():
 
 # Run the CLI entry point
 if __name__ == "__main__":
+    engine_name="VR38"
     car_profile=get_car_profile()
-    engine_name= car_profile['engine_name']
     ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
-    config = load_engine_config(engine_name,ve_map)
+    config= load_engine_config(engine_name, ve_map)
     start()
