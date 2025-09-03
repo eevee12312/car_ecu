@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont, QPalette, QLinearGradient, QBrush, QColor,QPixmap
 
 import throttle
 from engine_sound_mine import EngineSoundSimulator, play_turbo
-from throttle import MAX_RPM, max_boost,estp
+from throttle import TACH_RPM_LIMIT, max_boost,estp
 from tachometer import CircularGauge, SpeedGauge, RevLight, TurboGauge, GearDisplay, TempGauge
 
 
@@ -60,7 +60,7 @@ class ECUGUI(QMainWindow):
         main_layout.addWidget(self.rev_light)
         
         self.speed_gauge = SpeedGauge(0, estp)
-        self.rpm_gauge = CircularGauge(0, MAX_RPM)
+        self.rpm_gauge = CircularGauge(0, TACH_RPM_LIMIT)
         self.turbo_gauge = TurboGauge(0, max_boost)
         self.gear_display = GearDisplay(0, 6)
         self.temp_gauge = TempGauge(0,120)

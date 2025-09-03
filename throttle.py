@@ -121,60 +121,58 @@ def psi_to_kpa(psi):
 
 
 
-TUNE_MODE = "stage4"  # Change this to select different tunes
+TUNE_MODE = "R32"  # Change this to select different tunes
 
-TUNES = { 
-    "stock": { #274 horsepower  
+TUNES = {
+    "hyundai": { #hyundai coupe 2003 manual
         "MAX_RPM": 7000,
         "IDLE_RPM": 800,
-        "final_drive": 3.7,
-        "tire_diameter_m": 0.62,  # ~245/40R20
+        "final_drive": 4.06,
+        "tire_diameter_m": 0.632, 
         "driveline_efficiency": 0.78,
         "engine_inertia": 0.35,
-        "car_mass": 1740,
+        "car_mass": 1230,
         "GEARS": {
             0: 0,
-            1: 4.06,
-            2: 2.30,
-            3: 1.59,
-            4: 1.25,
-            5: 1.00,
-            6: 0.80
+            1: 3.46,
+            2: 2.05,
+            3: 1.39,
+            4: 1.06,
+            5: 0.84
+        },
+        "peak_rpm": 5000,
+        "red_line": 5500,
+        "max_boost": 1,  # psi
+        "max_torque": 184,  # Nm
+        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json",
+        "engine_name": "Beta II",
+        "frontal_area": 2.0,  # m^2, typical for a sports car
+        
+    }, 
+    "R32": { #274 horsepower  
+        "MAX_RPM": 8500,
+        "IDLE_RPM": 800,
+        "final_drive": 4.111,
+        "tire_diameter_m": 0.43,  # ~245/40R20
+        "driveline_efficiency": 0.78,
+        "engine_inertia": 0.35,
+        "car_mass": 1430,
+        "GEARS": {
+            0: 0,
+            1: 2.609,
+            2: 1.703,
+            3: 1.236,
+            4: 1.000,
+            5: 0.820
         },
         "peak_rpm": 4800,
-        "red_line": 5800,
-        "max_boost": 17.0,  # psi
-        "max_torque": 652,  # Nm (Stock VR38DETT in Nismo trim)
+        "red_line": 7500,
+        "max_boost": 10.0,  # psi
+        "max_torque": 353,  # Nm
         "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\factory_tune.json",
-        "engine_name": "VR38DETT",
+        "engine_name": "RB26DETT",
         "frontal_area": 2.2,  # m^2, typical for a sports car
         
-    },
-
-    "stage2": {  #375 horsepower
-        "MAX_RPM": 8000,
-        "IDLE_RPM": 850,
-        "final_drive": 3.7,
-        "tire_diameter_m": 0.62,
-        "driveline_efficiency": 0.8,
-        "engine_inertia": 0.32,
-        "car_mass": 1720,
-        "GEARS": {
-            0: 0,
-            1: 4.06,
-            2: 2.30,
-            3: 1.59,
-            4: 1.25,
-            5: 1.00,
-            6: 0.80
-        },
-        "peak_rpm": 5200,
-        "red_line": 6500,
-        "max_boost": 22.0,
-        "max_torque": 720,
-        "tune":r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\race_tune.json",
-        "engine_name": "VR38DETT",
-        "frontal_area": 2.2,  # m^2, typical for a sports car
     },
 
     "race": {  #1000 horsepower
@@ -297,6 +295,7 @@ red_line = tune["red_line"]
 tune_path=tune['tune']
 frontal_area=tune["frontal_area"]
 engine_name = tune["engine_name"]
+TACH_RPM_LIMIT=MAX_RPM+ 500
 LAUNCH_CONTROL_RPM = 4500  # Launch RPM setpoint
 LAUNCH_BUTTON_INDEX = 0    # Button 0 for launch control
 logged = False
@@ -469,6 +468,8 @@ def calculate_turbo_lag(rpm, throttle, map_kpa,boost_pressure,dt):
 def calculate_boost_psi_interactive(rpm, throttle):
     if rpm < config['spool_rpm']:
         return 0
+    if config['max_boost_psi'] == 0:
+        return 0
     ramp_factor = np.clip((rpm - config['spool_rpm']) / (config['full_boost_rpm'] - config['spool_rpm']), 0, 1)
     max_boost_kpa = psi_to_kpa(config['max_boost_psi'])
     target_boost = max_boost_kpa * throttle 
@@ -537,7 +538,7 @@ def calculate_speed_kph(rpm, gear):
 
 # == Estimate top speed ==
 def estimate_top_speed():
-    return round(calculate_speed_kph(MAX_RPM, len(GEARS)-1), -1)
+    return round(calculate_speed_kph(TACH_RPM_LIMIT, len(GEARS)-1), -1)
 estp = estimate_top_speed()
 
 # === Acceleration Model ===

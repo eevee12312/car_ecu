@@ -1,20 +1,20 @@
 import sys
 import math
-from throttle import MAX_RPM,max_boost,estp,red_line
+from throttle import TACH_RPM_LIMIT,max_boost,estp,red_line
 from PyQt6.QtWidgets import QApplication, QWidget , QHBoxLayout
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 
 
-class CircularGauge(QWidget):
-    def __init__(self, min_value=0, max_value=int(MAX_RPM), parent=None):
+class CircularGauge(QWidget): #RPM Gauge
+    def __init__(self, min_value=0, max_value=int(TACH_RPM_LIMIT), parent=None):
         super().__init__(parent)
         self.min_value = min_value
         self.max_value = max_value
         self.value = min_value
         
         self.start_angle=225
-        self.sweep_angle=270
+        self.sweep_angle=225
 
     def set_value(self, value):
         self.value = max(self.min_value, min(self.max_value, value))
@@ -35,7 +35,7 @@ class CircularGauge(QWidget):
         painter.drawEllipse(center[0] - radius, center[1] - radius, 2 * radius, 2 * radius)
 
         # Ticks and labels
-        num_ticks = int(MAX_RPM/1000)
+        num_ticks = int(TACH_RPM_LIMIT/1000)
         font = QFont("Arial", 10)
         painter.setFont(font)
         painter.setPen(QPen(Qt.GlobalColor.white, 4))
@@ -72,7 +72,7 @@ class CircularGauge(QWidget):
 
         # RedLine
         redline_start = int(red_line)
-        redline_end = int(MAX_RPM)
+        redline_end = int(TACH_RPM_LIMIT)
         start_angle_deg = self.start_angle - ((redline_start - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
         end_angle_deg = self.start_angle - ((redline_end - self.min_value) / (self.max_value - self.min_value)) * self.sweep_angle
 
@@ -182,8 +182,8 @@ class RevLight(QWidget):
         super().__init__()
         self.setFixedHeight(80)
 
-        self.num_lights = int(MAX_RPM/1000)
-        self.max_rpm = int(MAX_RPM)
+        self.num_lights = int(TACH_RPM_LIMIT/1000)
+        self.max_rpm = int(TACH_RPM_LIMIT)
         self.step = self.max_rpm // self.num_lights
 
         self.rev_labels = [QLabel(self) for _ in range(self.num_lights)]
@@ -305,7 +305,7 @@ class TurboGauge(QWidget):
             y1 = center[1] - (radius - 10) * math.sin(angle_rad)
             x2 = center[0] + radius * math.cos(angle_rad)
             y2 = center[1] - radius * math.sin(angle_rad)
-            if int(tick_val)%3==0:
+            if int(tick_val)%5==0:
                 painter.setPen(QPen(Qt.GlobalColor.white, 4))
             else:
                 painter.setPen(QPen(Qt.GlobalColor.white, 2))
