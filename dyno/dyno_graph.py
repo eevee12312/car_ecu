@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import math
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QHBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox,QHeaderView
+    QHBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox,QHeaderView,QGridLayout
 )
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -505,33 +505,41 @@ class VEMapEditor(QWidget):
 
         self.table = QTableWidget(len(ve_map.map_psi_points), len(ve_map.rpm_points))
         self.table.setHorizontalHeaderLabels([str(int(rpm)) for rpm in ve_map.rpm_points])
-        self.table.setVerticalHeaderLabels([str(int(psi)) for psi in ve_map.map_psi_points])
+        # Invert psi points for vertical header so lower psi is at the bottom
+        self.table.setVerticalHeaderLabels([str(int(psi)) for psi in ve_map.map_psi_points[::-1]])
         layout.addWidget(self.table)
 
         self.load_ve_map_to_table()
 
-        btn_layout = QHBoxLayout()
+        btn_layout = QGridLayout()
         self.btn_save = QPushButton("Save VE Map")
         self.btn_load = QPushButton("Load VE Map")
-        self.btn_run = QPushButton("Run Dyno Simulation")
+        self.btn_show_afr_3d = QPushButton("Show 3D AFR Map")
         self.btn_show_3d = QPushButton("Show 3D VE Map")
-        btn_layout.addWidget(self.btn_show_3d)
-        btn_layout.addWidget(self.btn_save)
-        btn_layout.addWidget(self.btn_load)
-        btn_layout.addWidget(self.btn_run)
+        self.btn_show_afr = QPushButton("Show AFR Map")
+        self.btn_show_ve_map = QPushButton("Show VE Map")
+        btn_layout.addWidget(self.btn_show_3d,0, 0)
+        btn_layout.addWidget(self.btn_save, 0, 1)
+        btn_layout.addWidget(self.btn_load, 0, 2)
+        btn_layout.addWidget(self.btn_show_afr_3d, 1,0)
+        btn_layout.addWidget(self.btn_show_afr, 1, 1)
+        btn_layout.addWidget(self.btn_show_ve_map, 1, 2)
         layout.addLayout(btn_layout)
 
         self.btn_show_3d.clicked.connect(self.show_3d_ve_map)
         self.btn_save.clicked.connect(self.save_ve_map)
         self.btn_load.clicked.connect(self.load_ve_map)
-        self.btn_run.clicked.connect(self.run_dyno)
+        self.btn_show_afr_3d.clicked.connect(self.show_3d_afr_map)
+        self.btn_show_ve_map.clicked.connect(self.load_ve_map_to_table)
+        self.btn_show_afr.clicked.connect(self.show_afr)
 
     def load_ve_map_to_table(self):
-        rows= len(self.ve_map.map_psi_points)
+        rows = len(self.ve_map.map_psi_points)
         cols = len(self.ve_map.rpm_points)
+        # Invert psi rows so lower psi is at the bottom
         for i in range(rows):
             for j in range(cols):
-                ve_val = self.ve_map.ve_grid[i, j] * 100
+                ve_val = self.ve_map.ve_grid[rows - 1 - i, j] * 100
                 item = QTableWidgetItem(f"{ve_val:.2f}")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -555,13 +563,15 @@ class VEMapEditor(QWidget):
         return QColor(r, g, b)
 
     def update_ve_map_from_table(self):
-        for i in range(len(self.ve_map.map_psi_points)):
+        rows = len(self.ve_map.map_psi_points)
+        for i in range(rows):
             for j in range(len(self.ve_map.rpm_points)):
                 item = self.table.item(i, j)
                 try:
                     val = float(item.text())
                     val = np.clip(val, 30.0, 150.0) / 100
-                    self.ve_map.ve_grid[i, j] = val
+                    # Invert psi rows so lower psi is at the bottom
+                    self.ve_map.ve_grid[rows - 1 - i, j] = val
                 except Exception:
                     pass
 
@@ -569,9 +579,65 @@ class VEMapEditor(QWidget):
         self.update_ve_map_from_table()
         filename, _ = QFileDialog.getSaveFileName(self, "Save VE Map", "", "JSON Files (*.json)")
         if filename:
+            # Save with compact arrays (no pretty indent, separators to minimize whitespace)
+            json_str = json.dumps({
+                'rpm_points': self.ve_map.rpm_points.tolist(),
+                'map_kpa_points': self.ve_map.map_psi_points.tolist(),
+                've_grid': self.ve_map.ve_grid.tolist(),
+                'afr_grid': self.ve_map.afr_grid.tolist(),
+                'boost_grid': self.ve_map.boost_target_grid.tolist(),
+                'thermal_grid': self.ve_map.thermal_grid.tolist()
+            },separators=(',', ':'))
+            
             with open(filename, 'w') as f:
-                f.write(self.ve_map.to_json())
+                f.write(json_str)
             QMessageBox.information(self, "Saved", "VE Map saved successfully.")
+    
+    def show_afr(self):
+        rows = len(self.ve_map.map_psi_points)
+        cols = len(self.ve_map.rpm_points)
+        # Invert psi rows so lower psi is at the bottom
+        for i in range(rows):
+            for j in range(cols):
+                ve_val = self.ve_map.afr_grid[rows - 1 - i, j]
+                item = QTableWidgetItem(f"{ve_val:.2f}")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                # Color coding: green = low, red = high
+                color = self.afr_color(ve_val)
+                item.setBackground(color)
+
+                self.table.setItem(i, j, item)
+
+    def afr_color(self, afr_val):
+        """Return a QColor: blue (low AFR), green (middle), yellow (between), red (high AFR)"""
+        min_val = 9.0
+        max_val = 16.5
+        afr_val = np.clip(afr_val, min_val, max_val)
+        t = (afr_val - min_val) / (max_val - min_val)
+
+        # Blue (low) -> Green (middle) -> Yellow (between) -> Red (high)
+        if t < 0.33:
+            # Blue to Green
+            ratio = t / 0.33
+            r = 0
+            g = int(255 * ratio)
+            b = int(255 * (1 - ratio))
+        elif t < 0.66:
+            # Green to Yellow
+            ratio = (t - 0.33) / (0.33)
+            r = int(255 * ratio)
+            g = 255
+            b = 0
+        else:
+            # Yellow to Red
+            ratio = (t - 0.66) / (0.34)
+            r = 255
+            g = int(255 * (1 - ratio))
+            b = 0
+
+        return QColor(r, g, b)
+
 
     def load_ve_map(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Load VE Map", "", "JSON Files (*.json)")
@@ -585,33 +651,33 @@ class VEMapEditor(QWidget):
     def run_dyno(self):
         self.update_ve_map_from_table()
         car_profile = get_car_profile()
-        car_profile['current_gear']=1
-        engine_config = load_engine_config(engine_name,self.ve_map)
-        shifts = [8600,8000, 7800, 7700, 7900]
-        rpm, torque, hp, speed_kph, ve, boost_psi, ign_eff, therm_eff, gears,engine_temp = simulate_dyno(car_profile, engine_config, shifts, ve_map)
+        car_profile['current_gear'] = 1
+        engine_config = load_engine_config(engine_name, self.ve_map)
+        shifts = [8600, 8000, 7800, 7700, 7900]
+        rpm, torque, hp, speed_kph, ve, boost_psi, ign_eff, therm_eff, gears, engine_temp = simulate_dyno(car_profile, engine_config, shifts, ve_map)
         # Get AFR from VE map for rpm and boost psi:
         afr = np.array([engine_config['afr'](r, b) for r, b in zip(rpm, boost_psi)])
 
         plot_dyno(rpm, torque, hp, speed_kph, ve, boost_psi, ign_eff, therm_eff, gears, afr)
         tuning_assistant(car_profile, engine_config)
 
-
     def show_3d_ve_map(self):
-        self.update_ve_map_from_table()
-        
+        #self.update_ve_map_from_table()
+
         rpm = np.array(self.ve_map.rpm_points)
         psi = np.array(self.ve_map.map_psi_points)
         ve = np.array(self.ve_map.ve_grid) * 100  # Convert to %
 
-        # Do NOT reverse RPM axis; keep low RPM closer, high RPM farther
-        RPM, PSI = np.meshgrid(rpm, psi)
+        # Invert psi axis so lower psi is more down
+        RPM, PSI = np.meshgrid(rpm, psi[::-1])
+        ve_plot = ve[::-1, :]
 
         fig = plt.figure(figsize=(10, 6), facecolor='black')
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
         ax.invert_xaxis()
 
         surf = ax.plot_surface(
-            RPM, PSI, ve,
+            RPM, PSI, ve_plot,
             cmap='jet',       # Similar to the image
             edgecolor='k',    # Black wireframe
             linewidth=0.3,
@@ -630,9 +696,57 @@ class VEMapEditor(QWidget):
         ax.zaxis.label.set_color('white')
 
         # Grid & background
-        ax.xaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
-        ax.yaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
-        ax.zaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
+        ax.xaxis._axinfo['grid'].update(color='gray', linestyle='--')
+        ax.yaxis._axinfo['grid'].update(color='gray', linestyle='--')
+        ax.zaxis._axinfo['grid'].update(color='gray', linestyle='--')
+
+        # Add color bar
+        cbar = fig.colorbar(surf, shrink=0.5, aspect=10)
+        cbar.ax.yaxis.set_tick_params(color='white')
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+
+        plt.tight_layout()
+        plt.show()
+
+
+    def show_3d_afr_map(self):
+        #self.update_ve_map_from_table()
+
+        rpm = np.array(self.ve_map.rpm_points)
+        psi = np.array(self.ve_map.map_psi_points)
+        ve = np.array(self.ve_map.afr_grid)
+
+        # Invert psi axis so lower psi is more down
+        RPM, PSI = np.meshgrid(rpm, psi[::-1])
+        ve_plot = ve[::-1, :]
+
+        fig = plt.figure(figsize=(10, 6), facecolor='black')
+        ax = fig.add_subplot(111, projection='3d', facecolor='black')
+        ax.invert_xaxis()
+
+        surf = ax.plot_surface(
+            RPM, PSI, ve_plot,
+            cmap='jet',       # Similar to the image
+            edgecolor='k',    # Black wireframe
+            linewidth=0.3,
+            antialiased=True
+        )
+
+        ax.set_title("AFR Map 3D Surface (RPM vs MAP vs AFR)", color='white')
+        ax.set_xlabel("RPM", color='white')
+        ax.set_ylabel("MAP (Kpa)", color='white')
+        ax.set_zlabel("AFR (1:AFR)", color='white')
+
+        # Set axis color
+        ax.tick_params(colors='white')
+        ax.xaxis.label.set_color('white')
+        ax.yaxis.label.set_color('white')
+        ax.zaxis.label.set_color('white')
+
+        # Grid & background
+        ax.xaxis._axinfo['grid'].update(color='gray', linestyle='--')
+        ax.yaxis._axinfo['grid'].update(color='gray', linestyle='--')
+        ax.zaxis._axinfo['grid'].update(color='gray', linestyle='--')
 
         # Add color bar
         cbar = fig.colorbar(surf, shrink=0.5, aspect=10)
@@ -717,8 +831,8 @@ def start():
 
 # Run the CLI entry point
 if __name__ == "__main__":
-    engine_name="VR38"
     car_profile=get_car_profile()
+    engine_name=car_profile['engine_name']
     ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
     config= load_engine_config(engine_name, ve_map)
     start()

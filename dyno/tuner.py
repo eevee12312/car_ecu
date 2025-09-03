@@ -1,26 +1,26 @@
 import sys
-import json
+import socket
+import threading
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout
+from PyQt6.QtGui import QFont
+import pyqtgraph as pg
 import numpy as np
-import matplotlib.pyplot as plt
-import math
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QHBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox,QHeaderView
-)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtCore import Qt
+import json
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
     QPushButton, QHBoxLayout, QFileDialog, QMessageBox
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QBrush
-from PyQt6.QtCore import Qt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import (needed for 3D)
-from matplotlib import cm
+
+
 
 
 # === Constants for RPM and MAP axis points ===
-RPM_POINTS = np.arange(1100, 9200, 400)  # RPM points (11 columns)
-MAP_PSI_POINTS = np.array([5, 10, 15, 20, 25, 30])  # MAP (psi) rows
+RPM_POINTS = np.arange(800, 11201, 400)  # RPM points (28 columns)
+MAP_PSI_POINTS = np.array([ 90, 150, 210, 270, 330, 390, 450, 510, 570, 630, 690, 750, 800]) # MAP kpa points (13 rows)
 
 
 
@@ -40,7 +40,7 @@ class EngineTuneMap2D:
 
         self.ve_grid = np.ones((len(map_psi_points), len(rpm_points))) * 0.7
         self.afr_grid = np.ones((len(map_psi_points), len(rpm_points))) * 14.7
-        self.boost_grid = np.zeros((len(map_psi_points), len(rpm_points)))
+        self.boost_target_grid = np.zeros((len(map_psi_points), len(rpm_points)))
         self.thermal_grid = np.zeros((len(map_psi_points), len(rpm_points)))
 
         for i, psi in enumerate(map_psi_points):
@@ -62,7 +62,7 @@ class EngineTuneMap2D:
                 rpm_factor = np.exp(-((rpm - 4500) / 2500) ** 2)
                 psi_factor = np.clip((psi - 5) / 25.0, 0, 1.0)
                 boost_target = 1.0 + 2.0 * psi_factor * rpm_factor
-                self.boost_grid[i, j] = np.clip(boost_target, 0.0, 3.0)
+                self.boost_target_grid[i, j] = np.clip(boost_target, 0.0, 3.0)
 
                 # Thermal Load Map (scaled VE * boost^2 approximation)
                 boost_abs = max(psi, 0)  # treat vacuum as zero
@@ -93,20 +93,16 @@ class EngineTuneMap2D:
         return v0 + y_frac * (v1 - v0)
 
     def get_ve(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.ve_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.ve_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_afr(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.afr_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.afr_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_target_boost_psi(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.boost_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.boost_target_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def get_thermal_load(self, rpm, map_kpa):
-        map_psi = map_kpa / 6.89476
-        return self._bilinear_interpolate(self.thermal_grid, self.rpm_points, self.map_psi_points, rpm, map_psi)
+        return self._bilinear_interpolate(self.thermal_grid, self.rpm_points, self.map_psi_points, rpm, map_kpa)
 
     def to_json(self):
         return json.dumps({
@@ -114,31 +110,34 @@ class EngineTuneMap2D:
             'map_psi_points': self.map_psi_points.tolist(),
             've_grid': self.ve_grid.tolist(),
             'afr_grid': self.afr_grid.tolist(),
-            'boost_grid': self.boost_grid.tolist(),
+            'boost_grid': self.boost_target_grid.tolist(),
             'thermal_grid': self.thermal_grid.tolist()
         }, indent=2)
 
     def from_json(self, json_str):
         data = json.loads(json_str)
         self.rpm_points = np.array(data['rpm_points'])
-        self.map_psi_points = np.array(data['map_psi_points'])
+        self.map_psi_points = np.array(data['map_kpa_points'])
         self.ve_grid = np.array(data['ve_grid'])
         self.afr_grid = np.array(data['afr_grid'])
-        self.boost_grid = np.array(data['boost_grid'])
+        self.boost_target_grid = np.array(data['boost_grid'])
         self.thermal_grid = np.array(data['thermal_grid'])
 
 
 
-# === Engine config tuned style using the VEMap2D instance ===
 
+
+# === Engine config tuned style using the VEMap2D instance ===
 function_map = {
     "ve_map.get_ve": lambda rpm, map_kpa, ve_map: ve_map.get_ve(rpm, map_kpa),
     "ve_map.get_afr": lambda rpm, map_kpa, ve_map: ve_map.get_afr(rpm, map_kpa),
     "ve_map.get_thermal_load": lambda rpm, map_kpa, ve_map: ve_map.get_thermal_load(rpm, map_kpa),
     "custom_boost_curve": lambda rpm, ve_map: custom_boost_curve(rpm, ve_map),
-    "custom_boost_pressure": lambda rpm: custom_boost_pressure(rpm),
+    "ve_map.get_target_boost_psi": lambda rpm, map_kpa, ve_map: ve_map.get_target_boost_psi(rpm, map_kpa),
     "custom_ignition_efficiency": lambda rpm: custom_ignition_efficiency(rpm),
 }
+
+
 
 def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
     with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\engine_profiles.json", "r") as f:
@@ -166,6 +165,7 @@ def load_engine_config(engine_name, ve_map: EngineTuneMap2D):
 
     return config
 
+
 def custom_boost_curve(rpm, ve_map):
     return np.interp(rpm, ve_map.rpm_points, [ve_map.map_psi_points[-1]] * len(ve_map.rpm_points))
 
@@ -175,194 +175,347 @@ def custom_boost_pressure(rpm):
 def custom_ignition_efficiency(rpm):
     return 1.00 - 0.10 * np.exp(-((rpm - 6000)/800)**2)
 
-ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-    QTableWidgetItem, QPushButton, QFileDialog, QMessageBox,
-    QTabWidget
-)
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
-import numpy as np
-import matplotlib.pyplot as plt
-import json
+# ---------------- SIGNAL CLASS ----------------
+class DataSignal(QObject):
+    data_received = pyqtSignal(int, float, int, float, float, float, float,float, float, int)  
 
 
-class MapEditor(QWidget):
-    def __init__(self, ve_map):
+
+class VEMapEditor(QWidget):
+    def __init__(self, ve_map,signal: DataSignal):
         super().__init__()
         self.ve_map = ve_map
-        self.setWindowTitle("Map Editor (VE / AFR / Boost / Thermal)")
-        self.resize(2600, 650)
+        self.setWindowTitle("VE Map Editor (RPM x MAP psi)")
+        self.resize(2400, 600)
 
-        layout = QVBoxLayout(self)
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        layout = QVBoxLayout()
+        self.setLayout(layout)
 
-        # Map types and their corresponding data keys
-        self.maps = {
-            'VE': ('ve_grid', '%', self.color_ve, (30.0, 150.0)),
-            'AFR': ('afr_grid', '', self.color_afr, (10.0, 18.0)),
-            'Boost': ('boost_grid', 'psi', self.color_boost, (0.0, 35.0)),
-            'Thermal': ('thermal_grid', '°C', self.color_thermal, (0.0, 1.0)),
-        }
+        label = QLabel("Edit Volumetric Efficiency (VE) values (%) - RPM (cols) vs MAP (psi) (rows)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
 
-        self.tables = {}
+        self.table = QTableWidget(len(ve_map.map_psi_points), len(ve_map.rpm_points))
+        self.table.setHorizontalHeaderLabels([str(int(rpm)) for rpm in ve_map.rpm_points])
+        self.table.setVerticalHeaderLabels([str(int(psi)) for psi in ve_map.map_psi_points[::-1]])
+        layout.addWidget(self.table)
 
-        for name in self.maps:
-            tab = QWidget()
-            tab_layout = QVBoxLayout(tab)
-            label = QLabel(f"Edit {name} Map ({self.maps[name][1]}) - RPM (cols) vs MAP psi (rows)")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            tab_layout.addWidget(label)
+        self.load_ve_map_to_table()
 
-            table = QTableWidget(len(ve_map.map_psi_points), len(ve_map.rpm_points))
-            table.setHorizontalHeaderLabels([str(int(rpm)) for rpm in ve_map.rpm_points])
-            table.setVerticalHeaderLabels([str(int(psi)) for psi in ve_map.map_psi_points])
-            tab_layout.addWidget(table)
-            self.tables[name] = table
-            self.tabs.addTab(tab, name)
+    def load_ve_map_to_table(self):
+        rows = len(self.ve_map.map_psi_points)
+        cols = len(self.ve_map.rpm_points)
+        # Get current RPM and MAP psi from car_profile if available
+        current_rpm = None
+        current_map_psi = None
+        try:
+            # Try to get current values from car_profile (if available)
+            boost_kpa=boost  # Convert boost psi to kPa
+            current_rpm = rpm
+            current_map_psi = boost_kpa
+        except Exception:
+            pass
 
-        self.load_all_maps_to_tables()
+        # Find closest indices for current RPM and MAP psi
+        rpm_idx = None
+        map_idx = None
+        if current_rpm is not None and current_map_psi is not None:
+            rpm_idx = (np.abs(self.ve_map.rpm_points - current_rpm)).argmin()
+            map_idx = (np.abs(self.ve_map.map_psi_points - current_map_psi)).argmin()
+            # Table rows are reversed for MAP psi
+            map_idx = rows - 1 - map_idx
 
-        # Buttons
-        btn_layout = QHBoxLayout()
-        self.btn_show_3d = QPushButton("Show 3D Map")
-        self.btn_save = QPushButton("Save Maps")
-        self.btn_load = QPushButton("Load Maps")
-        self.btn_run = QPushButton("Run Dyno Simulation")
-        btn_layout.addWidget(self.btn_show_3d)
-        btn_layout.addWidget(self.btn_save)
-        btn_layout.addWidget(self.btn_load)
-        btn_layout.addWidget(self.btn_run)
-        layout.addLayout(btn_layout)
+        for i in range(rows):
+            for j in range(cols):
+                ve_val = self.ve_map.ve_grid[rows - 1 - i, j] * 100
+                item = QTableWidgetItem(f"{ve_val:.2f}")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.btn_show_3d.clicked.connect(self.show_3d_map)
-        self.btn_save.clicked.connect(self.save_maps)
-        self.btn_load.clicked.connect(self.load_maps)
+                # Color coding: green = low, red = high
+                color = self.ve_color(ve_val)
+                item.setBackground(color)
 
-    def color_ve(self, val):
-        return self.gradient_color(val, 30.0, 150.0)
+                # Mark current cell in purple
+                if rpm_idx is not None and map_idx is not None and i == map_idx and j == rpm_idx:
+                    item.setBackground(QColor(128, 0, 128))  # Purple
 
-    def color_afr(self, val):
-        return self.gradient_color(val, 10.0, 18.0, color_low=(255, 0, 0), color_high=(0, 255, 0))
+                self.table.setItem(i, j, item)
 
-    def color_boost(self, val):
-        return self.gradient_color(val, 0.0, 35.0)
+    def ve_color(self, ve_val):
+        """Return a QColor from green (30%) to red (120%)"""
+        min_val = 30.0
+        max_val = 150.0
+        ve_val = np.clip(ve_val, min_val, max_val)
+        t = (ve_val - min_val) / (max_val - min_val)
 
-    def color_thermal(self, val):
-        return self.gradient_color(val, 0.0, 1.0, color_low=(0, 0, 255), color_high=(255, 165, 0))
+        r = int(0 + t * (255 - 0))       # Red increases
+        g = int(255 - t * (255 - 0))     # Green decreases
+        b = 0
 
-    def gradient_color(self, val, min_val, max_val, color_low=(0, 255, 0), color_high=(255, 0, 0)):
-        val = np.clip(val, min_val, max_val)
-        t = (val - min_val) / (max_val - min_val)
-        r = int(color_low[0] + t * (color_high[0] - color_low[0]))
-        g = int(color_low[1] + t * (color_high[1] - color_low[1]))
-        b = int(color_low[2] + t * (color_high[2] - color_low[2]))
         return QColor(r, g, b)
 
-    def load_all_maps_to_tables(self):
-        for name, (grid_name, suffix, color_func, _) in self.maps.items():
-            grid = getattr(self.ve_map, grid_name)
-            table = self.tables[name]
-            for i in range(grid.shape[0]):
-                for j in range(grid.shape[1]):
-                    val = grid[i, j] * 100 if name == 'VE' else grid[i, j]
-                    item = QTableWidgetItem(f"{val:.2f}")
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    item.setBackground(color_func(val))
-                    table.setItem(i, j, item)
-
-    def update_maps_from_tables(self):
-        for name, (grid_name, _, _, (min_val, max_val)) in self.maps.items():
-            grid = getattr(self.ve_map, grid_name)
-            table = self.tables[name]
-            for i in range(grid.shape[0]):
-                for j in range(grid.shape[1]):
-                    try:
-                        val = float(table.item(i, j).text())
-                        val = np.clip(val, min_val, max_val)
-                        grid[i, j] = val / 100.0 if name == 'VE' else val
-                    except:
-                        pass
-
-    def save_maps(self):
-            self.update_maps_from_tables()
-            filename, _ = QFileDialog.getSaveFileName(self, "Save Maps", filter="JSON Files (*.json)")
-            if filename:
+    def update_ve_map_from_table(self):
+        rows= len(self.ve_map.map_psi_points)
+        for i in range(rows):
+            for j in range(len(self.ve_map.rpm_points)):
+                item = self.table.item(i, j)
                 try:
-                    with open(filename, 'w') as f:
-                        f.write(self.ve_map.to_json())
-                    QMessageBox.information(self, "Saved", "Maps saved successfully.")
+                    val = float(item.text())
+                    val = np.clip(val, 30.0, 150.0) / 100
+                    self.ve_map.ve_grid[rows - 1 - i, j] = val
+                except Exception:
+                    pass
+
+class AFRMapEditor(QWidget):
+    def __init__(self, ve_map,signal: DataSignal):
+        super().__init__()
+        self.ve_map = ve_map
+        self.setWindowTitle("AFR Map Editor (RPM x MAP Kpa)")
+        self.resize(2400, 600)
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        label = QLabel("Edit Air Fuel Ratio (AFR) values (AFR) - RPM (cols) vs MAP (KPA) (rows)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+        self.table = QTableWidget(len(ve_map.map_psi_points), len(ve_map.rpm_points))
+        self.table.setHorizontalHeaderLabels([str(int(rpm)) for rpm in ve_map.rpm_points])
+        self.table.setVerticalHeaderLabels([str(int(psi)) for psi in ve_map.map_psi_points[::-1]])
+        layout.addWidget(self.table)
+
+        self.load_afr_map_to_table()
+
+    def load_afr_map_to_table(self):
+        rows = len(self.ve_map.map_psi_points)
+        cols = len(self.ve_map.rpm_points)
+        # Get current RPM and MAP psi from car_profile if available
+        current_rpm = None
+        current_map_psi = None
+        try:
+            # Try to get current values from car_profile (if available)
+            boost_kpa=boost  # Convert boost psi to kPa
+            current_rpm = rpm
+            current_map_psi = boost_kpa
+        except Exception:
+            pass
+
+        # Find closest indices for current RPM and MAP psi
+        rpm_idx = None
+        map_idx = None
+        if current_rpm is not None and current_map_psi is not None:
+            rpm_idx = (np.abs(self.ve_map.rpm_points - current_rpm)).argmin()
+            map_idx = (np.abs(self.ve_map.map_psi_points - current_map_psi)).argmin()
+            # Table rows are reversed for MAP psi
+            map_idx = rows - 1 - map_idx
+
+        for i in range(rows):
+            for j in range(cols):
+                ve_val = self.ve_map.afr_grid[rows - 1 - i, j]
+                item = QTableWidgetItem(f"{ve_val:.2f}")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                # Color coding: green = low, red = high
+                color = self.afr_color(ve_val)
+                item.setBackground(color)
+
+                # Mark current cell in purple
+                if rpm_idx is not None and map_idx is not None and i == map_idx and j == rpm_idx:
+                    item.setBackground(QColor(128, 0, 128))  # Purple
+
+                self.table.setItem(i, j, item)
+
+    def afr_color(self, afr_val):
+        """Return a QColor: blue (low AFR), green (middle), yellow (between), red (high AFR)"""
+        min_val = 9.0
+        max_val = 16.5
+        afr_val = np.clip(afr_val, min_val, max_val)
+        t = (afr_val - min_val) / (max_val - min_val)
+
+        # Blue (low) -> Green (middle) -> Yellow (between) -> Red (high)
+        if t < 0.33:
+            # Blue to Green
+            ratio = t / 0.33
+            r = 0
+            g = int(255 * ratio)
+            b = int(255 * (1 - ratio))
+        elif t < 0.66:
+            # Green to Yellow
+            ratio = (t - 0.33) / (0.33)
+            r = int(255 * ratio)
+            g = 255
+            b = 0
+        else:
+            # Yellow to Red
+            ratio = (t - 0.66) / (0.34)
+            r = 255
+            g = int(255 * (1 - ratio))
+            b = 0
+
+        return QColor(r, g, b)
+
+    def update_afr_map_from_table(self):
+        rows= len(self.ve_map.map_psi_points)
+        for i in range(rows):
+            for j in range(len(self.ve_map.rpm_points)):
+                item = self.table.item(i, j)
+                try:
+                    val = float(item.text())
+                    val = np.clip(val, 30.0, 150.0) / 100
+                    self.ve_map.afr_grid[rows - 1 - i, j] = val
+                except Exception:
+                    pass
+
+
+# ---------------- SOCKET RECEIVER ----------------
+class TelemetryReceiver:
+    def __init__(self, signal: DataSignal, host='127.0.0.1', port=9000):
+        self.signal = signal
+        self.host = host
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen(1)
+
+        threading.Thread(target=self.accept_loop, daemon=True).start()
+
+    def accept_loop(self):
+        while True:
+            conn, addr = self.sock.accept()
+            threading.Thread(target=self.handle_client, args=(conn,), daemon=True).start()
+
+    def handle_client(self, conn):
+        with conn:
+            while True:
+                try:
+                    data = conn.recv(1024)
+                    if not data:
+                        break
+                    decoded = data.decode().strip()
+                    parts = decoded.split(",")
+                    if len(parts) >= 7:
+                        global rpm,boost,ve
+                        rpm = int(parts[0])
+                        speed = float(parts[1])
+                        gear = int(parts[2])
+                        boost = float(parts[3])
+                        hp = float(parts[4])
+                        torque = float(parts[5])
+                        acceleration = float(parts[6])
+                        ve = float(parts[7])
+                        afr = float(parts[8])
+                        tps = int(parts[9])
+
+                        self.signal.data_received.emit(rpm, speed, gear, boost, hp, torque, acceleration, ve, afr, tps)
+                        ve_editor.load_ve_map_to_table()  # Update VE map display
+                        afr_editor.load_afr_map_to_table()  # Update AFR map display
                 except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Failed to save maps: {e}")
+                    print(f"[ECU GUI] Error: {e}")
+                    break
 
-    def load_maps(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Load Maps", filter="JSON Files (*.json)")
-        if filename:
-            try:
-                with open(filename, 'r') as f:
-                    self.ve_map.from_json(f.read())
-                self.load_all_maps_to_tables()
-                QMessageBox.information(self, "Loaded", "Maps loaded successfully.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load maps: {e}")
+# ---------------- DASHBOARD WIDGET ----------------
+class DynoDashboard(QWidget):
+    def __init__(self, signal: DataSignal):
+        super().__init__()
+        self.setWindowTitle("Live Dyno Display")
+        self.resize(900, 600)
 
-    def show_3d_map(self):
-        for item in self.maps.items():
-            self.update_maps_from_tables()
-            
-            rpm = np.array(self.ve_map.rpm_points)
-            psi = np.array(self.ve_map.map_psi_points)
-            if item[1][0]=='ve_grid':
-                ve = np.array(self.ve_map.ve_grid) * 100  # Convert to %
-            elif item[1][0]=='afr_grid':
-                ve = np.array(self.ve_map.afr_grid) * 100  # Convert to %
-            elif item[1][0]=='boost_grid':
-                ve = np.array(self.ve_map.boost_grid) * 100  # Convert to %
-            elif item[1][0]=='thermal_grid':
-                ve = np.array(self.ve_map.thermal_grid) * 100  # Convert to %
+        # Fonts
+        big_font = QFont("Arial", 18, QFont.Weight.Bold)
+        label_font = QFont("Arial", 14)
 
-            RPM, PSI = np.meshgrid(rpm, psi)
+        # Labels
+        self.rpm_label = QLabel("RPM: 0")
+        self.speed_label = QLabel("Speed: 0 km/h")
+        self.gear_label = QLabel("Gear: N")
+        self.boost_label = QLabel("Boost: 0 Kpa")
+        self.hp_label = QLabel("HP: 0")
+        self.torque_label = QLabel("Torque: 0 Nm")
+        self.accel_label = QLabel("Accel: 0 m/s²")
+        self.ve_label = QLabel("VE: 0.00")
+        self.afr_label = QLabel("AFR: 0.00")
+        self.tps_label = QLabel("TPS: 0%")
 
-            fig = plt.figure(figsize=(10, 6), facecolor='black')
-            ax = fig.add_subplot(111, projection='3d', facecolor='black')
+        for lbl in [self.rpm_label, self.speed_label, self.gear_label,
+                    self.boost_label, self.hp_label, self.torque_label, self.accel_label,self.ve_label, self.afr_label, self.tps_label]:
+            lbl.setFont(big_font)
 
-            surf = ax.plot_surface(
-                RPM, PSI, ve,
-                cmap='jet',       # Similar to the image
-                edgecolor='k',    # Black wireframe
-                linewidth=0.3,
-                antialiased=True
-            )
+        # Grid for text data
+        grid = QGridLayout()
+        grid.addWidget(self.rpm_label, 0, 0)
+        grid.addWidget(self.speed_label, 0, 1)
+        grid.addWidget(self.gear_label, 1, 0)
+        grid.addWidget(self.boost_label, 1, 1)
+        grid.addWidget(self.hp_label, 2, 0)
+        grid.addWidget(self.torque_label, 2, 1)
+        grid.addWidget(self.accel_label, 3, 0)
+        grid.addWidget(self.ve_label, 3, 1)
+        grid.addWidget(self.afr_label, 4, 0)
+        grid.addWidget(self.tps_label, 4, 1)
+        # Combined HP & Torque Graph
+        self.hp_torque_plot = pg.PlotWidget(title="Horsepower & Torque")
+        self.hp_torque_plot.setYRange(0, 500)  # adjustable
+        self.hp_torque_plot.showGrid(x=True, y=True)
+        self.hp_curve = self.hp_torque_plot.plot(pen=pg.mkPen(color='r', width=2), name="HP")
+        self.torque_curve = self.hp_torque_plot.plot(pen=pg.mkPen(color='y', width=2), name="Torque")
 
-            ax.set_title(f"{item[1][0]}", color='white')
-            ax.set_xlabel("RPM", color='white')
-            ax.set_ylabel("MAP (psi)", color='white')
-            ax.set_zlabel("VE (%)", color='white')
+        # Boost Graph
+        self.boost_plot = pg.PlotWidget(title="Boost Pressure")
+        self.boost_plot.setYRange(0, 200)  # adjustable
+        self.boost_plot.showGrid(x=True, y=True)
+        self.boost_curve = self.boost_plot.plot(pen=pg.mkPen(color='g', width=2))
 
-            # Set axis color
-            ax.tick_params(colors='white')
-            ax.xaxis.label.set_color('white')
-            ax.yaxis.label.set_color('white')
-            ax.zaxis.label.set_color('white')
+        self.hp_data = []
+        self.boost_data = []
+        self.torque_data = []
+        self.x_data = []
 
-            # Grid & background
-            ax.xaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
-            ax.yaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
-            ax.zaxis._axinfo['grid'].update(color = 'gray', linestyle='--')
+        # Layout
+        layout = QVBoxLayout()
+        layout.addLayout(grid)
 
-            # Add color bar
-            cbar = fig.colorbar(surf, shrink=0.5, aspect=10)
-            cbar.ax.yaxis.set_tick_params(color='white')
-            plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
+        graph_layout = QHBoxLayout()
+        graph_layout.addWidget(self.hp_torque_plot)
+        graph_layout.addWidget(self.boost_plot)
+        layout.addLayout(graph_layout)
 
-            plt.tight_layout()
-            plt.show()
+        self.setLayout(layout)
 
+        # Connect signal
+        signal.data_received.connect(self.update_display)
+    def abs_kpa_to_psi(self, kpa):
+        return max((kpa - 101.3) / 6.89476,0)
 
+    def update_display(self, rpm, speed, gear, boost, hp, torque, accel, ve, afr, tps):
+        self.rpm_label.setText(f"RPM: {rpm}")
+        self.speed_label.setText(f"Speed: {speed:.1f} km/h")
+        self.gear_label.setText(f"Gear: {gear}")
+        self.boost_label.setText(f"Boost: {self.abs_kpa_to_psi(boost):.1f} psi")
+        self.hp_label.setText(f"HP: {hp:.1f}")
+        self.torque_label.setText(f"Torque: {torque:.1f} Nm")
+        self.accel_label.setText(f"Accel: {accel:.2f} m/s²")
+        self.ve_label.setText(f"VE: {ve:.2f}")
+        self.afr_label.setText(f"AFR: {afr:.2f}")
+        self.tps_label.setText(f"TPS: {tps}%")
 
+        # Append new data for graphs
+        if len(self.x_data) > 200:
+            self.x_data.pop(0)
+            self.hp_data.pop(0)
+            self.torque_data.pop(0)
+            self.boost_data.pop(0)
+        if rpm < 10000:
+            self.x_data.append(rpm)
+            self.hp_data.append(hp)
+            self.boost_data.append(boost)
+            self.torque_data.append(torque)
 
+            self.hp_curve.setData(self.x_data, self.hp_data)
+            self.torque_curve.setData(self.x_data, self.torque_data)
+            self.boost_curve.setData(self.x_data, self.boost_data)
+
+# ---------------- MAIN APP ----------------
 
 def get_car_profile():
     with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\car_profile.json", "r") as f:
@@ -371,24 +524,41 @@ def get_car_profile():
 
 
 def start():
-    filename=r"C:\Users\Owner\Desktop\ctf\car_ecu\dyno\lfa_tune.json"
+    filename=car_profile['tune']
+
+
     try:
         with open(filename, "r") as f:
             json_str = f.read()
         ve_map.from_json(json_str)
         print(f"Loaded VE map from {filename.split("\\")[-1]}")
     except FileNotFoundError:
-        print(f"{filename.split("\\")[-1]} not found, using default VE map.")
+        print("r35_tune.json not found, using default VE map.")
 
-    app = QApplication(sys.argv)
-    editor = MapEditor(ve_map)
-    editor.show()
-    sys.exit(app.exec())
-
-# Run the CLI entry point
 if __name__ == "__main__":
-    car_profile=get_car_profile()
-    engine_name=car_profile["engine_name"]
-    ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
-    config = load_engine_config(engine_name,ve_map)
-    start()
+    try:
+        car_profile=get_car_profile()
+        engine_name = car_profile['engine_name']
+        ve_map = EngineTuneMap2D(RPM_POINTS, MAP_PSI_POINTS)
+        config= load_engine_config(engine_name, ve_map)
+        start()
+        signal = DataSignal()
+        app = QApplication(sys.argv)
+        
+
+        TelemetryReceiver(signal)  # Starts listening for socket data
+
+        dash = DynoDashboard(signal)
+        dash.show()
+        ve_editor = VEMapEditor(ve_map,signal)
+        ve_editor.show()
+        afr_editor = AFRMapEditor(ve_map,signal)
+        afr_editor.show()
+
+        sys.exit(app.exec())
+    except Exception as e:
+        with open(r"C:\Users\Owner\Desktop\ctf\car_ecu\errors.txt", 'a') as error_log:
+            error_log.write(f"Error: {e}\n")
+        print(f"An error occurred: {e}")
+
+#display in the ve map what the current ve is for the current rpm and boost

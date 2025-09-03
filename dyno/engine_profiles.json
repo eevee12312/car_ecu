@@ -19,6 +19,26 @@
         "knock_ve_threshold": 0.95,
         "knock_boost_threshold_kpa": 170.0
     },
+    "RB26DETT": {
+        "displacement_l": 2.6,
+        "cylinders": 6,
+        "volumetric_efficiency": "function:ve_map.get_ve",
+        "afr": "function:ve_map.get_afr",
+        "boost_target_psi": "function:custom_boost_curve",
+        "boost_pressure_kpa": "function:ve_map.get_target_boost_psi",
+        "air_density": 1.18,
+        "ignition_efficiency": "function:custom_ignition_efficiency",
+        "thermal_efficiency": "function:ve_map.get_thermal_load",
+        "fuel_density": 0.760,
+        "fuel_energy_mj": 45,
+        "max_boost_psi": 10.0,
+        "spool_rpm": 2200,
+        "full_boost_rpm": 4000,
+        "turbo_efficiency": 0.93,
+        "base_thermal_efficiency": 0.35,
+        "knock_ve_threshold": 0.95,
+        "knock_boost_threshold_kpa": 170.0
+    },
     "hayabusa": {
         "displacement_l": 1.3,
         "cylinders": 4,
@@ -79,5 +99,25 @@
         "knock_ve_threshold": 0.95,
         "knock_boost_threshold_kpa": 170.0
 
+    },
+    "Beta II":{
+        "displacement_l": 1.975,
+        "cylinders": 4,
+        "volumetric_efficiency": "function:ve_map.get_ve",
+        "afr": "function:ve_map.get_afr",
+        "boost_target_psi": "function:custom_boost_curve",
+        "boost_pressure_kpa": "function:ve_map.get_target_boost_psi",
+        "air_density": 1.18,
+        "ignition_efficiency": "function:custom_ignition_efficiency",
+        "thermal_efficiency": "function:ve_map.get_thermal_load",
+        "fuel_density": 0.760,
+        "fuel_energy_mj": 45,
+        "max_boost_psi": 1.0,
+        "spool_rpm": 3000,
+        "full_boost_rpm": 5000,
+        "turbo_efficiency": 0.93,
+        "base_thermal_efficiency": 0.35,
+        "knock_ve_threshold": 0.95,
+        "knock_boost_threshold_kpa": 170.0
     }
 }
